@@ -437,6 +437,7 @@ config NET_DEVLINK
 
 config PAGE_POOL
        bool
+       default y
 
 config FAILOVER
 	tristate "Generic failover module"

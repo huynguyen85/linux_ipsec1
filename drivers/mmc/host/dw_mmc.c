@@ -265,7 +265,7 @@ static void mci_send_cmd(struct dw_mci_slot *slot, u32 cmd, u32 arg)
 
 	if (readl_poll_timeout_atomic(host->regs + SDMMC_CMD, cmd_status,
 				      !(cmd_status & SDMMC_CMD_START),
-				      1, 500 * USEC_PER_MSEC))
+				      1, 1000 * USEC_PER_MSEC))
 		dev_err(&slot->mmc->class_dev,
 			"Timeout sending command (cmd %#x arg %#x status %#x)\n",
 			cmd, arg, cmd_status);
@@ -1228,6 +1228,9 @@ static void dw_mci_setup_bus(struct dw_mci_slot *slot, bool force_clkinit)
 	u32 clk_en_a, ctype;
 	u32 sdmmc_cmd_bits = SDMMC_CMD_UPD_CLK | SDMMC_CMD_PRV_DAT_WAIT;
 
+	/* Wait for any pending commands. */
+	dw_mci_wait_while_busy(host, 0, slot);
+
 	/* Save the information for other slots. */
 	clk_en_a = mci_readl(host, CLKENA) &
 		~((SDMMC_CLKEN_ENABLE | SDMMC_CLKEN_LOW_PWR) << slot->id);
@@ -1279,10 +1282,12 @@ static void dw_mci_setup_bus(struct dw_mci_slot *slot, bool force_clkinit)
 
 		/* disable clock */
 		mci_writel(host, CLKENA, 0);
-		mci_writel(host, CLKSRC, 0);
 
 		/* inform CIU */
 		mci_send_cmd(slot, sdmmc_cmd_bits, 0);
+
+		/* set clock source */
+		mci_writel(host, CLKSRC, 0);
 
 		/* set clock to desired speed */
 		mci_writel(host, CLKDIV, div);
@@ -2646,6 +2651,7 @@ static void dw_mci_handle_cd(struct dw_mci *host)
 {
 	int i;
 	struct dw_mci_slot *slot;
+	unsigned long delay = 0;
 
 	for (i = 0; i < host->num_slots; i++) {
 		slot = host->slots[i];
@@ -2654,7 +2660,9 @@ static void dw_mci_handle_cd(struct dw_mci *host)
 		if (slot->mmc->ops->card_event)
 			slot->mmc->ops->card_event(slot->mmc);
 		mmc_detect_change(slot->mmc,
-			msecs_to_jiffies(host->pdata->detect_delay_ms));
+			msecs_to_jiffies(host->pdata->detect_delay_ms) +
+			delay);
+		delay += 2 * HZ;
 	}
 }
 
@@ -3456,6 +3464,9 @@ int dw_mci_probe(struct dw_mci *host)
 			dev_dbg(host->dev, "slot %d init failed\n", i);
 			goto err_dmaunmap;
 		}
+		/* Add a delay for each additional slot. */
+		if (host->num_slots > 1)
+			msleep(2000);
 	}
 	host->slot = host->slots[0];
 

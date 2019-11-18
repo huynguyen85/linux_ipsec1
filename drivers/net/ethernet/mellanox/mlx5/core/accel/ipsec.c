@@ -31,8 +31,6 @@
  *
  */
 
-#ifdef CONFIG_MLX5_FPGA_IPSEC
-
 #include <linux/mlx5/device.h>
 
 #include "accel/ipsec.h"
@@ -123,5 +121,3 @@ int mlx5_accel_esp_modify_xfrm(struct mlx5_accel_esp_xfrm *xfrm,
 	return mlx5_fpga_esp_modify_xfrm(xfrm, attrs);
 }
 EXPORT_SYMBOL_GPL(mlx5_accel_esp_modify_xfrm);
-
-#endif

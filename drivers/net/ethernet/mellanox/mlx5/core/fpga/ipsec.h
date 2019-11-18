@@ -71,6 +71,47 @@ static inline u32 mlx5_fpga_ipsec_device_caps(struct mlx5_core_dev *mdev)
 	return 0;
 }
 
+static inline unsigned int mlx5_fpga_ipsec_counters_count(struct mlx5_core_dev *mdev)
+{
+	return 0;
+}
+
+static inline int mlx5_fpga_ipsec_counters_read(struct mlx5_core_dev *mdev,
+						u64 *counters,
+						unsigned int counters_count)
+{
+	return 0;
+}
+
+static inline void *mlx5_fpga_ipsec_create_sa_ctx(struct mlx5_core_dev *mdev,
+						  struct mlx5_accel_esp_xfrm *accel_xfrm,
+						  const __be32 saddr[4],
+						  const __be32 daddr[4],
+						  const __be32 spi, bool is_ipv6,
+						  u32 *sa_handle)
+{
+	return NULL;
+}
+
+static inline int mlx5_fpga_ipsec_init(struct mlx5_core_dev *mdev) { return 0; }
+static inline void mlx5_fpga_ipsec_delete_sa_ctx(void *context) { }
+static inline void mlx5_fpga_ipsec_build_fs_cmds(void) { }
+static inline void mlx5_fpga_ipsec_cleanup(struct mlx5_core_dev *mdev) { }
+static inline struct mlx5_accel_esp_xfrm *
+mlx5_fpga_esp_create_xfrm(struct mlx5_core_dev *mdev,
+			  const struct mlx5_accel_esp_xfrm_attrs *attrs,
+			  u32 flags)
+{
+	return NULL;
+}
+
+static inline void mlx5_fpga_esp_destroy_xfrm(struct mlx5_accel_esp_xfrm *xfrm) { }
+static inline int mlx5_fpga_esp_modify_xfrm(struct mlx5_accel_esp_xfrm *xfrm,
+					    const struct mlx5_accel_esp_xfrm_attrs *attrs)
+{
+	return 0;
+}
+
 static inline const struct mlx5_flow_cmds *
 mlx5_fs_cmd_get_default_ipsec_fpga_cmds(enum fs_flow_table_type type)
 {

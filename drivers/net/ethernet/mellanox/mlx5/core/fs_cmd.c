@@ -467,6 +467,12 @@ static int mlx5_cmd_set_fte(struct mlx5_core_dev *dev,
 		MLX5_SET(flow_context, in_flow_context, modify_header_id,
 			 fte->action.modify_hdr->id);
 
+	if (fte->action.action &
+	    (MLX5_FLOW_CONTEXT_ACTION_IPSEC_DECRYPT |
+	     MLX5_FLOW_CONTEXT_ACTION_IPSEC_ENCRYPT))
+		MLX5_SET(flow_context, in_flow_context, ipsec_obj_id,
+			 fte->action.ipsec_obj_id);
+
 	vlan = MLX5_ADDR_OF(flow_context, in_flow_context, push_vlan);
 
 	MLX5_SET(vlan, vlan, ethtype, fte->action.vlan[0].ethtype);

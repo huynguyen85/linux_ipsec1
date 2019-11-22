@@ -7,6 +7,17 @@
 #include <linux/mlx5/driver.h>
 #include "accel/ipsec.h"
 
+struct mlx5_ipsec_sa_ctx {
+	struct rhash_head hash;
+	u32 enc_key_id;
+	u32 ipsec_obj_id;
+	struct mlx5_flow_handle *ipsec_rule;
+	struct mlx5_modify_hdr *set_modify_hdr;
+	/* hw ctx */
+	struct mlx5_core_dev *dev;
+	struct mlx5_ipsec_esp_xfrm *mxfrm;
+};
+
 #ifdef CONFIG_MLX5_IPSEC
 
 struct mlx5_accel_esp_xfrm *

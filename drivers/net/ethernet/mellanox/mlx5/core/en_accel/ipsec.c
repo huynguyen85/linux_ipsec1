@@ -40,7 +40,7 @@
 #include "en.h"
 #include "en_accel/ipsec.h"
 #include "en_accel/ipsec_rxtx.h"
-
+#include "en_accel/ipsec_steering.h"
 
 static struct mlx5e_ipsec_sa_entry *to_ipsec_sa_entry(struct xfrm_state *x)
 {
@@ -203,6 +203,9 @@ mlx5e_ipsec_build_accel_xfrm_attrs(struct mlx5e_ipsec_sa_entry *sa_entry,
 	memcpy(&attrs->saddr, x->props.saddr.a6, sizeof(attrs->saddr));
 	memcpy(&attrs->daddr, x->id.daddr.a6, sizeof(attrs->daddr));
 	attrs->is_ipv6 = (x->props.family != AF_INET);
+
+	/* netdev priv */
+	attrs->priv = netdev_priv(x->xso.dev);
 }
 
 static inline int mlx5e_xfrm_validate_state(struct xfrm_state *x)
@@ -329,10 +332,14 @@ static int mlx5e_xfrm_add_state(struct xfrm_state *x)
 		goto err_xfrm;
 	}
 
+	err = mlx5e_xfrm_add_rule(priv, sa_entry);
+	if (err)
+		goto err_hw_ctx;
+
 	if (x->xso.flags & XFRM_OFFLOAD_INBOUND) {
 		err = mlx5e_ipsec_sadb_rx_add(sa_entry, sa_handle);
 		if (err)
-			goto err_hw_ctx;
+			goto err_add_rule;
 	} else {
 		sa_entry->set_iv_op = (x->props.flags & XFRM_STATE_ESN) ?
 				mlx5e_ipsec_set_iv_esn : mlx5e_ipsec_set_iv;
@@ -341,6 +348,8 @@ static int mlx5e_xfrm_add_state(struct xfrm_state *x)
 	x->xso.offload_handle = (unsigned long)sa_entry;
 	goto out;
 
+err_add_rule:
+	mlx5e_xfrm_del_rule(priv, sa_entry);
 err_hw_ctx:
 	mlx5_accel_esp_free_hw_context(sa_entry->xfrm, sa_entry->hw_context);
 err_xfrm:
@@ -366,12 +375,14 @@ static void mlx5e_xfrm_del_state(struct xfrm_state *x)
 static void mlx5e_xfrm_free_state(struct xfrm_state *x)
 {
 	struct mlx5e_ipsec_sa_entry *sa_entry = to_ipsec_sa_entry(x);
+	struct mlx5e_priv *priv = netdev_priv(x->xso.dev);
 
 	if (!sa_entry)
 		return;
 
 	if (sa_entry->hw_context) {
 		flush_workqueue(sa_entry->ipsec->wq);
+		mlx5e_xfrm_del_rule(priv, sa_entry);
 		mlx5_accel_esp_free_hw_context(sa_entry->xfrm, sa_entry->hw_context);
 		mlx5_accel_esp_destroy_xfrm(sa_entry->xfrm);
 	}

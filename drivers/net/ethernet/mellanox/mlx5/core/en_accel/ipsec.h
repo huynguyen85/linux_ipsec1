@@ -92,6 +92,11 @@ struct mlx5e_ipsec_esn_state {
 	u8 overlap: 1;
 };
 
+struct mlx5e_ipsec_rule {
+	struct mlx5_flow_handle *rule;
+	struct mlx5_modify_hdr *set_modify_hdr;
+};
+
 struct mlx5e_ipsec_sa_entry {
 	struct hlist_node hlist; /* Item in SADB_RX hashtable */
 	struct mlx5e_ipsec_esn_state esn_state;
@@ -102,6 +107,7 @@ struct mlx5e_ipsec_sa_entry {
 	void *hw_context;
 	void (*set_iv_op)(struct sk_buff *skb, struct xfrm_state *x,
 			  struct xfrm_offload *xo);
+	struct mlx5e_ipsec_rule ipsec_rule;
 };
 
 void mlx5e_ipsec_build_inverse_table(void);

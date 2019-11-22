@@ -7,15 +7,6 @@
 
 #define MLX5_IPSEC_DEV_BASIC_CAPS (MLX5_ACCEL_IPSEC_CAP_DEVICE | MLX5_ACCEL_IPSEC_CAP_IPV6 | \
 				   MLX5_ACCEL_IPSEC_CAP_LSO)
-struct mlx5_ipsec_sa_ctx {
-	struct rhash_head hash;
-	u32 enc_key_id;
-	u32 ipsec_obj_id;
-	struct mlx5_flow_handle *ipsec_rule;
-	/* hw ctx */
-	struct mlx5_core_dev *dev;
-	struct mlx5_ipsec_esp_xfrm *mxfrm;
-};
 
 struct mlx5_ipsec_esp_xfrm {
 	/* reference counter of SA ctx */
@@ -29,6 +20,10 @@ u32 mlx5_ipsec_device_caps(struct mlx5_core_dev *mdev)
 	u32 caps = MLX5_IPSEC_DEV_BASIC_CAPS;
 
 	if (!mlx5_is_ipsec_device(mdev))
+		return 0;
+
+	if (!MLX5_CAP_FLOWTABLE_NIC_TX(mdev, ipsec_encrypt) ||
+	    !MLX5_CAP_FLOWTABLE_NIC_RX(mdev, ipsec_decrypt))
 		return 0;
 
 	if (MLX5_CAP_IPSEC(mdev, ipsec_crypto_esp_aes_gcm_128_encrypt) &&

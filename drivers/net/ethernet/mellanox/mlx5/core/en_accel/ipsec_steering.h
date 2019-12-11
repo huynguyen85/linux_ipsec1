@@ -15,6 +15,8 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv,
 			struct mlx5e_ipsec_sa_entry *sa_entry);
 void mlx5e_xfrm_del_rule(struct mlx5e_priv *priv,
 			 struct mlx5e_ipsec_sa_entry *sa_entry);
+int mlx5e_ipsec_create_tx_ft(struct mlx5e_priv *priv);
+void mlx5e_ipsec_destroy_tx_ft(struct mlx5e_priv *priv);
 
 #endif /* CONFIG_MLX5_EN_IPSEC */
 #endif /* __MLX5_IPSEC_STEERING_H__ */

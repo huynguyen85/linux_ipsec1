@@ -367,3 +367,39 @@ void mlx5e_xfrm_del_rule(struct mlx5e_priv *priv, struct mlx5e_ipsec_sa_entry *s
 		sa_entry->ipsec_rule.set_modify_hdr = NULL;
 	}
 }
+
+#define NUM_IPSEC_FTE BIT(15)
+#define NUM_IPSEC_FG 1
+
+int mlx5e_ipsec_create_tx_ft(struct mlx5e_priv *priv)
+{
+	struct mlx5_flow_table_attr ft_attr = {};
+	struct mlx5e_ipsec *ipsec = priv->ipsec;
+	struct mlx5_flow_table *ft;
+
+	if (!ipsec)
+		return 0;
+
+	ft_attr.max_fte = NUM_IPSEC_FTE;
+	ft_attr.autogroup.max_num_groups = NUM_IPSEC_FG;
+	ft = mlx5_create_auto_grouped_flow_table(priv->fs.egress_ns, &ft_attr);
+	if (IS_ERR(ft)) {
+		mlx5_core_err(priv->mdev, "fail to create ipsec tx ft\n");
+		return PTR_ERR(ft);
+	}
+	ipsec->ft_tx = ft;
+	return 0;
+}
+
+void mlx5e_ipsec_destroy_tx_ft(struct mlx5e_priv *priv)
+{
+	struct mlx5e_ipsec *ipsec = priv->ipsec;
+
+	if (!ipsec)
+		return;
+
+	if (!IS_ERR_OR_NULL(ipsec->ft_tx)) {
+		mlx5_destroy_flow_table(ipsec->ft_tx);
+		ipsec->ft_tx = NULL;
+	}
+}

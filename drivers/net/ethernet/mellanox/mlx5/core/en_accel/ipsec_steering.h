@@ -20,6 +20,8 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv,
 			struct mlx5e_ipsec_sa_entry *sa_entry);
 void mlx5e_xfrm_del_rule(struct mlx5e_priv *priv,
 			 struct mlx5e_ipsec_sa_entry *sa_entry);
+int mlx5e_ipsec_create_tx_ft(struct mlx5e_priv *priv);
+void mlx5e_ipsec_destroy_tx_ft(struct mlx5e_priv *priv);
 int mlx5e_ipsec_rx_inline_init(struct mlx5e_priv *priv, enum mlx5e_traffic_types type);
 int mlx5e_ipsec_rx_inline_remove(struct mlx5e_priv *priv, enum mlx5e_traffic_types type);
 int mlx5e_ipsec_is_supported(struct mlx5e_priv *priv, enum mlx5e_traffic_types type);

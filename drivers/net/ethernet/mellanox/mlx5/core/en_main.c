@@ -66,7 +66,7 @@
 #include "en/hv_vhca_stats.h"
 #include "en/devlink.h"
 #include "lib/mlx5.h"
-
+#include "en_accel/ipsec_fs.h"
 
 bool mlx5e_check_fragmented_striding_rq_cap(struct mlx5_core_dev *mdev)
 {
@@ -3306,6 +3306,8 @@ err_close_tises:
 static void mlx5e_cleanup_nic_tx(struct mlx5e_priv *priv)
 {
 	mlx5e_destroy_tises(priv);
+
+	mlx5e_ipsec_destroy_tx_ft(priv);
 }
 
 static void mlx5e_build_indir_tir_ctx_common(struct mlx5e_priv *priv,
@@ -5196,16 +5198,24 @@ static int mlx5e_init_nic_tx(struct mlx5e_priv *priv)
 {
 	int err;
 
+	err = mlx5e_ipsec_create_tx_ft(priv);
+	if (err)
+		return err;
+
 	err = mlx5e_create_tises(priv);
 	if (err) {
 		mlx5_core_warn(priv->mdev, "create tises failed, %d\n", err);
-		return err;
+		goto err_tises;
 	}
 
 #ifdef CONFIG_MLX5_CORE_EN_DCB
 	mlx5e_dcbnl_initialize(priv);
 #endif
 	return 0;
+
+err_tises:
+	mlx5e_ipsec_destroy_tx_ft(priv);
+	return err;
 }
 
 static void mlx5e_nic_enable(struct mlx5e_priv *priv)

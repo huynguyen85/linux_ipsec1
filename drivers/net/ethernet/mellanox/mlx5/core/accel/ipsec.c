@@ -149,7 +149,7 @@ int mlx5_accel_esp_modify_xfrm(struct mlx5_accel_esp_xfrm *xfrm,
 			       const struct mlx5_accel_esp_xfrm_attrs *attrs)
 {
 	if (mlx5_is_ipsec_device(xfrm->mdev))
-		return 0;
+		return mlx5_ipsec_esp_modify_xfrm(xfrm, attrs);
 
 	return mlx5_fpga_esp_modify_xfrm(xfrm, attrs);
 }

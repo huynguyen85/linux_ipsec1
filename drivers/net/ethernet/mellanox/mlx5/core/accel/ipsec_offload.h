@@ -51,6 +51,8 @@ static inline bool mlx5_is_ipsec_device(struct mlx5_core_dev *mdev)
 		MLX5_CAP_ETH(mdev, insert_trailer);
 }
 
+int mlx5_ipsec_esp_modify_xfrm(struct mlx5_accel_esp_xfrm *xfrm,
+			       const struct mlx5_accel_esp_xfrm_attrs *attrs);
 #else
 static inline u32 mlx5_ipsec_device_caps(struct mlx5_core_dev *mdev)
 {
@@ -80,5 +82,12 @@ static inline bool mlx5_is_ipsec_device(struct mlx5_core_dev *mdev)
 {
 	return false;
 }
+
+static inline int mlx5_ipsec_esp_modify_xfrm(struct mlx5_accel_esp_xfrm *xfrm,
+					     const struct mlx5_accel_esp_xfrm_attrs *attrs)
+{
+	return 0;
+}
+
 #endif /* CONFIG_MLX5_IPSEC */
 #endif /* __MLX5_IPSEC_H__ */

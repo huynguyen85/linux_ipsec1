@@ -3,6 +3,7 @@
 
 #include <linux/netdevice.h>
 #include "accel/ipsec_offload.h"
+#include "ipsec_steering.h"
 #include "en_accel/fs.h"
 #include "fs_core.h"
 
@@ -209,11 +210,6 @@ out:
 	return err;
 }
 
-#define MLX5E_ACCEL_FS_NUM_GROUPS	(2)
-#define MLX5E_ACCEL_FS_GROUP1_SIZE	(BIT(16) - 1)
-#define MLX5E_ACCEL_FS_GROUP2_SIZE	(BIT(0))
-#define MLX5E_ACCEL_FS_TABLE_SIZE	(MLX5E_ACCEL_FS_GROUP1_SIZE +\
-					 MLX5E_ACCEL_FS_GROUP2_SIZE)
 static int accel_fs_create_groups(struct mlx5e_flow_table *ft,
 				  enum accel_fs_type type)
 {
@@ -399,6 +395,10 @@ void mlx5e_accel_fs_destroy_tables(struct mlx5e_priv *priv)
 
 	mlx5e_accel_fs_disable(priv);
 
+#ifdef CONFIG_MLX5_EN_IPSEC
+	mlx5e_ipsec_destroy_rx_err_ft(priv);
+#endif
+
 	for (i = 0; i < ACCEL_FS_NUM_TYPES; i++) {
 		if (!IS_ERR_OR_NULL(priv->fs.accel.accel_tables[i].t)) {
 			mlx5_del_flow_rules(priv->fs.accel.default_rules[i]);
@@ -455,11 +455,18 @@ int mlx5e_accel_fs_create_tables(struct mlx5e_priv *priv)
 			goto err;
 	}
 
+#ifdef CONFIG_MLX5_EN_IPSEC
+	err = mlx5e_ipsec_create_rx_err_ft(priv);
+	if (err)
+		goto err;
+#endif
+
 	err = mlx5e_accel_fs_enable(priv);
 	if (err)
 		goto err;
 
 	return 0;
+
 err:
 	mlx5e_accel_fs_destroy_tables(priv);
 	return err;

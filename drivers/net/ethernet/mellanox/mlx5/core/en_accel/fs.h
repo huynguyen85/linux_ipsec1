@@ -8,6 +8,12 @@
 
 #include "en.h"
 
+#define MLX5E_ACCEL_FS_NUM_GROUPS	(2)
+#define MLX5E_ACCEL_FS_GROUP1_SIZE	(BIT(16) - 1)
+#define MLX5E_ACCEL_FS_GROUP2_SIZE	(BIT(0))
+#define MLX5E_ACCEL_FS_TABLE_SIZE	(MLX5E_ACCEL_FS_GROUP1_SIZE +\
+					 MLX5E_ACCEL_FS_GROUP2_SIZE)
+
 int mlx5e_accel_fs_create_tables(struct mlx5e_priv *priv);
 void mlx5e_accel_fs_destroy_tables(struct mlx5e_priv *priv);
 #else

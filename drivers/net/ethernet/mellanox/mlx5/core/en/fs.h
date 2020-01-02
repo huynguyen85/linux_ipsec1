@@ -120,6 +120,7 @@ enum {
 	MLX5E_INNER_TTC_FT_LEVEL,
 #ifdef CONFIG_MLX5_ACCEL
 	MLX5E_ACCEL_FS_FT_LEVEL,
+	MLX5E_ACCEL_FS_ERR_FT_LEVEL,
 #endif
 #ifdef CONFIG_MLX5_EN_ARFS
 	MLX5E_ARFS_FT_LEVEL
@@ -211,9 +212,26 @@ enum  accel_fs_type {
 	ACCEL_FS_NUM_TYPES,
 };
 
+#ifdef CONFIG_MLX5_EN_IPSEC
+enum accel_fs_ipsec_default_type {
+	IPV4_ESP,
+	IPV6_ESP,
+	IPSEC_DEFAULT_TYPES,
+};
+
+struct mlx5e_ipsec_default {
+	struct mlx5e_flow_table  ft_rx_err;
+	struct mlx5_flow_handle *copy_fte;
+	struct mlx5_modify_hdr  *copy_modify_hdr;
+};
+#endif
+
 struct mlx5e_accel_fs {
 	struct mlx5e_flow_table  accel_tables[ACCEL_FS_NUM_TYPES];
 	struct mlx5_flow_handle *default_rules[ACCEL_FS_NUM_TYPES];
+#ifdef CONFIG_MLX5_EN_IPSEC
+	struct mlx5e_ipsec_default ipsec_default[IPSEC_DEFAULT_TYPES];
+#endif
 };
 
 int mlx5e_arfs_create_tables(struct mlx5e_priv *priv);

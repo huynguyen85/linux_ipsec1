@@ -10,6 +10,12 @@
 #include "accel/ipsec_offload.h"
 #include "en/fs.h"
 
+struct mlx5e_ipsec_rx_err {
+	struct mlx5_flow_table *ft_rx_err;
+	struct mlx5_flow_handle *copy_fte;
+	struct mlx5_modify_hdr *copy_modify_hdr;
+};
+
 int mlx5e_ipsec_rx_inline_init(struct mlx5e_priv *priv, enum mlx5e_traffic_types type);
 int mlx5e_ipsec_rx_inline_remove(struct mlx5e_priv *priv, enum mlx5e_traffic_types type);
 int mlx5e_ipsec_is_supported(struct mlx5e_priv *priv, enum mlx5e_traffic_types type);

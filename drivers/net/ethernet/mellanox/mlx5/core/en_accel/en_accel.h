@@ -131,4 +131,12 @@ mlx5e_accel_handle_tx(struct sk_buff *skb,
 	return skb;
 }
 
+#ifdef CONFIG_MLX5_EN_IPSEC
+#define MLX5E_IPSEC_STATS_GRPS \
+&MLX5E_STATS_GRP(ipsec_sw), \
+&MLX5E_STATS_GRP(ipsec_hw),
+#else
+#define MLX5E_IPSEC_STATS_GRPS
+#endif
+
 #endif /* __MLX5E_EN_ACCEL_H__ */

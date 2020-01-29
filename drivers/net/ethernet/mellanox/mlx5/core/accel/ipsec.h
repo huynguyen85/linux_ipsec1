@@ -47,7 +47,8 @@ int mlx5_accel_ipsec_counters_read(struct mlx5_core_dev *mdev, u64 *counters,
 void *mlx5_accel_esp_create_hw_context(struct mlx5_core_dev *mdev,
 				       struct mlx5_accel_esp_xfrm *xfrm,
 				       u32 *sa_handle);
-void mlx5_accel_esp_free_hw_context(void *context);
+void mlx5_accel_esp_free_hw_context(struct mlx5_accel_esp_xfrm *xfrm,
+				    void *context);
 
 int mlx5_accel_ipsec_init(struct mlx5_core_dev *mdev);
 void mlx5_accel_ipsec_build_fs_cmds(void);

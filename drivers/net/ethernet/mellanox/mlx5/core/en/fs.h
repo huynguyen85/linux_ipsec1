@@ -204,6 +204,10 @@ struct mlx5e_arfs_tables {
 enum  accel_fs_type {
 	ACCEL_FS_IPV4_TCP,
 	ACCEL_FS_IPV6_TCP,
+#ifdef CONFIG_MLX5_EN_IPSEC
+	ACCEL_FS_IPV4_ESP,
+	ACCEL_FS_IPV6_ESP,
+#endif
 	ACCEL_FS_NUM_TYPES,
 };
 

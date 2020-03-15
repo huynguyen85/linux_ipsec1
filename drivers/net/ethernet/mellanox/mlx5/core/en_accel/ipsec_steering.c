@@ -241,6 +241,19 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv, struct mlx5e_ipsec_sa_entry *sa
 
 		dest.ft = ((struct mlx5e_ipsec_rx_err *)(prot->proto_priv))->ft_rx_err;
 		rule_tmp = mlx5_add_flow_rules(prot->ft, spec, &flow_act, &dest, 1);
+	} else {
+		/* Add IPsec indicator in metdata_reg_a */
+		spec->match_criteria_enable |= MLX5_MATCH_MISC_PARAMETERS_2;
+		MLX5_SET(fte_match_param,
+			 spec->match_criteria, misc_parameters_2.metadata_reg_a,
+			 MLX5_ETH_WQE_FT_META_IPSEC);
+		MLX5_SET(fte_match_param, spec->match_value, misc_parameters_2.metadata_reg_a,
+			 MLX5_ETH_WQE_FT_META_IPSEC);
+
+		flow_act.action = MLX5_FLOW_CONTEXT_ACTION_ALLOW |
+				  MLX5_FLOW_CONTEXT_ACTION_IPSEC_ENCRYPT;
+		rule_tmp = mlx5_add_flow_rules(priv->ipsec->ft_tx, spec,
+					       &flow_act, NULL, 0);
 	}
 
 	if (IS_ERR(rule_tmp)) {

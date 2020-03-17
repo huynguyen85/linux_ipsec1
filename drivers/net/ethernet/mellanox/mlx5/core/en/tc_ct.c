@@ -500,7 +500,7 @@ mlx5_tc_ct_entry_add_rule(struct mlx5_tc_ct_priv *ct_priv,
 	if (err) {
 		netdev_warn(ct_priv->netdev,
 			    "Failed to allocate tuple id, err: %d\n", err);
-		return err;
+		goto err_idr_alloc;
 	}
 	zone_rule->tupleid = tupleid;
 
@@ -542,6 +542,7 @@ err_rule:
 	mlx5_modify_header_dealloc(esw->dev, attr->modify_hdr);
 err_mod_hdr:
 	idr_remove(&ct_priv->tuple_ids, zone_rule->tupleid);
+err_idr_alloc:
 	kfree(spec);
 	return err;
 }

@@ -567,6 +567,30 @@ int xfrm_output(struct sock *sk, struct sk_buff *skb)
 
 	secpath_reset(skb);
 
+	if (x->xso.flags & XFRM_OFFLOAD_FULL) {
+		struct dst_entry *dst;
+
+		if (0) /* Check for exception like frag, IPv6 extension TBD */
+			goto sw_ipsec;
+
+	        dst = skb_dst_pop(skb);
+	        if (!dst) {
+	                return -EHOSTUNREACH;
+	        }
+	        skb_dst_set(skb, dst);
+
+	        err = skb_dst(skb)->ops->local_out(net, skb->sk, skb);
+	        if (unlikely(err != 1)) {
+	                return err;
+	        }
+
+	        if (!skb_dst(skb)->xfrm) {
+	                return dst_output(net, skb->sk, skb);
+	        }
+
+	        return 0;
+	}
+
 	if (xfrm_dev_offload_ok(skb, x)) {
 		struct sec_path *sp;
 
@@ -592,6 +616,7 @@ int xfrm_output(struct sock *sk, struct sk_buff *skb)
 			goto out;
 	}
 
+sw_ipsec:
 	if (skb_is_gso(skb))
 		return xfrm_output_gso(net, sk, skb);
 

@@ -33,7 +33,7 @@
 #ifndef __LIB_CLOCK_H__
 #define __LIB_CLOCK_H__
 
-#if IS_ENABLED(CONFIG_PTP_1588_CLOCK)
+#if IS_REACHABLE(CONFIG_PTP_1588_CLOCK)
 void mlx5_init_clock(struct mlx5_core_dev *mdev);
 void mlx5_cleanup_clock(struct mlx5_core_dev *mdev);
 

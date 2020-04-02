@@ -4,7 +4,7 @@
 #ifndef __LIB_HV_H__
 #define __LIB_HV_H__
 
-#if IS_ENABLED(CONFIG_PCI_HYPERV_INTERFACE)
+#if IS_REACHABLE(CONFIG_PCI_HYPERV_INTERFACE)
 
 #include <linux/hyperv.h>
 #include <linux/mlx5/driver.h>

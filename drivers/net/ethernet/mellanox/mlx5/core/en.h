@@ -794,7 +794,7 @@ struct mlx5e_modify_sq_param {
 	int rl_index;
 };
 
-#if IS_ENABLED(CONFIG_PCI_HYPERV_INTERFACE)
+#if IS_REACHABLE(CONFIG_PCI_HYPERV_INTERFACE)
 struct mlx5e_hv_vhca_stats_agent {
 	struct mlx5_hv_vhca_agent *agent;
 	struct delayed_work        work;
@@ -884,7 +884,7 @@ struct mlx5e_priv {
 	struct devlink_health_reporter *rx_reporter;
 	struct devlink_port            dl_port;
 	struct mlx5e_xsk           xsk;
-#if IS_ENABLED(CONFIG_PCI_HYPERV_INTERFACE)
+#if IS_REACHABLE(CONFIG_PCI_HYPERV_INTERFACE)
 	struct mlx5e_hv_vhca_stats_agent stats_agent;
 #endif
 	struct mlx5e_scratchpad    scratchpad;

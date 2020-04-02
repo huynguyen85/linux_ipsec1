@@ -5,7 +5,7 @@
 #define __MLX5_EN_STATS_VHCA_H__
 #include "en.h"
 
-#if IS_ENABLED(CONFIG_PCI_HYPERV_INTERFACE)
+#if IS_REACHABLE(CONFIG_PCI_HYPERV_INTERFACE)
 
 int mlx5e_hv_vhca_stats_create(struct mlx5e_priv *priv);
 void mlx5e_hv_vhca_stats_destroy(struct mlx5e_priv *priv);

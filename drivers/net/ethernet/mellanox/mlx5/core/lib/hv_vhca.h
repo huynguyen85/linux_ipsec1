@@ -17,7 +17,7 @@ enum mlx5_hv_vhca_agent_type {
 	MLX5_HV_VHCA_AGENT_MAX = 32,
 };
 
-#if IS_ENABLED(CONFIG_PCI_HYPERV_INTERFACE)
+#if IS_REACHABLE(CONFIG_PCI_HYPERV_INTERFACE)
 
 struct mlx5_hv_vhca_control_block {
 	u32     capabilities;

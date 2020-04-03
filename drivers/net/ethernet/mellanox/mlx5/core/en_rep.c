@@ -49,6 +49,7 @@
 #include "fs_core.h"
 #include "lib/port_tun.h"
 #include "lib/mlx5.h"
+#include "en_accel/ipsec.h"
 #define CREATE_TRACE_POINTS
 #include "diag/en_rep_tracepoint.h"
 
@@ -56,6 +57,8 @@
         max(0x7, MLX5E_PARAMS_MINIMUM_LOG_SQ_SIZE)
 #define MLX5E_REP_PARAMS_DEF_NUM_CHANNELS 1
 
+
+#define DEBUG_FL(format,...) if(0) { printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__); }
 static const char mlx5e_rep_driver_name[] = "mlx5e_rep";
 
 struct mlx5e_rep_indr_block_priv {
@@ -1490,6 +1493,7 @@ static void mlx5e_build_rep_netdev(struct net_device *netdev)
 	struct mlx5_eswitch_rep *rep = rpriv->rep;
 	struct mlx5_core_dev *mdev = priv->mdev;
 
+	DEBUG_FL("Enter");
 	if (rep->vport == MLX5_VPORT_UPLINK) {
 		SET_NETDEV_DEV(netdev, mdev->device);
 		netdev->netdev_ops = &mlx5e_netdev_ops_uplink_rep;
@@ -1506,6 +1510,9 @@ static void mlx5e_build_rep_netdev(struct net_device *netdev)
 		netdev->ethtool_ops = &mlx5e_rep_ethtool_ops;
 	}
 
+	DEBUG_FL("call ipsec_build_netdev");
+	mlx5e_ipsec_build_netdev(priv);
+	DEBUG_FL("post call ipsec_build_netdev");
 	netdev->watchdog_timeo    = 15 * HZ;
 
 	netdev->features       |= NETIF_F_NETNS_LOCAL;
@@ -1525,8 +1532,10 @@ static void mlx5e_build_rep_netdev(struct net_device *netdev)
 		netdev->features |= NETIF_F_VLAN_CHALLENGED;
 
 	netdev->features |= netdev->hw_features;
+	DEBUG_FL("OUT");
 }
 
+// 
 static int mlx5e_init_rep(struct mlx5_core_dev *mdev,
 			  struct net_device *netdev,
 			  const struct mlx5e_profile *profile,
@@ -1535,14 +1544,22 @@ static int mlx5e_init_rep(struct mlx5_core_dev *mdev,
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 	int err;
 
+	DEBUG_FL("call mlx5e_netdev_init");
 	err = mlx5e_netdev_init(netdev, priv, mdev, profile, ppriv);
 	if (err)
 		return err;
+	DEBUG_FL("Post call mlx5e_netdev_init");
 
 	priv->channels.params.num_channels = MLX5E_REP_PARAMS_DEF_NUM_CHANNELS;
 
 	mlx5e_build_rep_params(netdev);
+	err = mlx5e_ipsec_init(priv);
+        if (err)
+                mlx5_core_err(mdev, "IPSec initialization failed, %d\n", err);
+
+	DEBUG_FL("call mlx5e_build_rep_netdev");
 	mlx5e_build_rep_netdev(netdev);
+	DEBUG_FL("post call  mlx5e_build_rep_netdev");
 
 	mlx5e_timestamp_init(priv);
 
@@ -1551,6 +1568,7 @@ static int mlx5e_init_rep(struct mlx5_core_dev *mdev,
 
 static void mlx5e_cleanup_rep(struct mlx5e_priv *priv)
 {
+	mlx5e_ipsec_cleanup(priv);
 	mlx5e_netdev_cleanup(priv->netdev, priv);
 }
 
@@ -2057,6 +2075,11 @@ mlx5e_vport_rep_load(struct mlx5_core_dev *dev, struct mlx5_eswitch_rep *rep)
 	nch = mlx5e_get_max_num_channels(dev);
 	profile = (rep->vport == MLX5_VPORT_UPLINK) ?
 		  &mlx5e_uplink_rep_profile : &mlx5e_rep_profile;
+	if (rep->vport == MLX5_VPORT_UPLINK) {
+		DEBUG_FL("&&mlx5e_uplink_rep_profile chosen");
+	} else {
+		DEBUG_FL("&mlx5e_rep_profile chosen");
+	}
 	netdev = mlx5e_create_netdev(dev, profile, nch, rpriv);
 	if (!netdev) {
 		mlx5_core_warn(dev,

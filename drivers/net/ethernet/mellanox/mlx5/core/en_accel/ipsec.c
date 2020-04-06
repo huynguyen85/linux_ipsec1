@@ -300,6 +300,11 @@ static int mlx5e_xfrm_add_state(struct xfrm_state *x)
 	if (err)
 		return err;
 
+	if (x->xso.flags & XFRM_OFFLOAD_FULL) {
+		netdev_err(netdev, "mlx5e_xfrm_add_state full offload\n");
+		return 0;
+	}
+
 	sa_entry = kzalloc(sizeof(*sa_entry), GFP_KERNEL);
 	if (!sa_entry) {
 		err = -ENOMEM;
@@ -365,6 +370,11 @@ static void mlx5e_xfrm_del_state(struct xfrm_state *x)
 {
 	struct mlx5e_ipsec_sa_entry *sa_entry = to_ipsec_sa_entry(x);
 
+	if (x->xso.flags & XFRM_OFFLOAD_FULL) {
+		netdev_err(x->xso.dev, "mlx5e_xfrm_del_state full offload\n");
+		return;
+	}
+
 	if (!sa_entry)
 		return;
 
@@ -376,6 +386,11 @@ static void mlx5e_xfrm_free_state(struct xfrm_state *x)
 {
 	struct mlx5e_ipsec_sa_entry *sa_entry = to_ipsec_sa_entry(x);
 	struct mlx5e_priv *priv = netdev_priv(x->xso.dev);
+
+	if (x->xso.flags & XFRM_OFFLOAD_FULL) {
+		netdev_err(x->xso.dev, "mlx5e_xfrm_free_state full offload\n");
+		return;
+	}
 
 	if (!sa_entry)
 		return;

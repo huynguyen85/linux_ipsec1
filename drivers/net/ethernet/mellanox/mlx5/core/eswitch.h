@@ -167,6 +167,7 @@ struct mlx5_eswitch_fdb {
 		struct legacy_fdb {
 			struct mlx5_flow_table *fdb;
 			struct mlx5_flow_group *addr_grp;
+			struct mlx5_flow_group *ipsec_grp;
 			struct mlx5_flow_group *allmulti_grp;
 			struct mlx5_flow_group *promisc_grp;
 			struct mlx5_flow_table *vepa_fdb;
@@ -178,6 +179,7 @@ struct mlx5_eswitch_fdb {
 			struct mlx5_flow_namespace *ns;
 			struct mlx5_flow_table *slow_fdb;
 			struct mlx5_flow_group *send_to_vport_grp;
+			struct mlx5_flow_group *ipsec_grp;
 			struct mlx5_flow_group *peer_miss_grp;
 			struct mlx5_flow_handle **peer_miss_rules;
 			struct mlx5_flow_group *miss_grp;

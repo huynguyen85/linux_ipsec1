@@ -46,6 +46,7 @@ enum mlx5_accel_esp_flags {
 	MLX5_ACCEL_ESP_FLAGS_TRANSPORT         = 1UL << 0,
 	MLX5_ACCEL_ESP_FLAGS_ESN_TRIGGERED     = 1UL << 1,
 	MLX5_ACCEL_ESP_FLAGS_ESN_STATE_OVERLAP = 1UL << 2,
+	MLX5_ACCEL_ESP_FLAGS_FULL_OFFLOAD      = 1UL << 3,
 };
 
 enum mlx5_accel_esp_action {

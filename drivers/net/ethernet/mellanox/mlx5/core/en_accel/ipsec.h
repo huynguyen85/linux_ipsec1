@@ -85,6 +85,7 @@ struct mlx5e_ipsec {
 	struct mlx5e_ipsec_stats stats;
 	struct workqueue_struct *wq;
 	struct mlx5_flow_table *ft_tx;
+	struct mlx5_flow_table *fast_fdb;
 };
 
 struct mlx5e_ipsec_esn_state {
@@ -96,6 +97,7 @@ struct mlx5e_ipsec_esn_state {
 struct mlx5e_ipsec_rule {
 	struct mlx5_flow_handle *rule;
 	struct mlx5_modify_hdr *set_modify_hdr;
+	struct mlx5_pkt_reformat * pkt_reformat;
 };
 
 struct mlx5e_ipsec_sa_entry {

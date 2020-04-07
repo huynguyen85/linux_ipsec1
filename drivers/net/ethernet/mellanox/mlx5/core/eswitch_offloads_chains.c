@@ -632,6 +632,7 @@ mlx5_esw_chains_destroy_fdb_prio(struct mlx5_eswitch *esw,
 	mlx5_esw_chains_put_fdb_chain(fdb_chain);
 	kvfree(fdb_prio);
 }
+#define DEBUG_FL_ESW(format,...) printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__)
 
 struct mlx5_flow_table *
 mlx5_esw_chains_get_table(struct mlx5_eswitch *esw, u32 chain, u32 prio,
@@ -764,6 +765,7 @@ mlx5_esw_chains_init(struct mlx5_eswitch *esw)
 	struct mapping_ctx *mapping;
 	int err;
 
+	printk("%s:%d.\n", __func__,__LINE__);
 	chains_priv = kzalloc(sizeof(*chains_priv), GFP_KERNEL);
 	if (!chains_priv)
 		return -ENOMEM;
@@ -786,6 +788,7 @@ mlx5_esw_chains_init(struct mlx5_eswitch *esw)
 	} else if (!fdb_modify_header_fwd_to_table_supported(esw)) {
 		/* Disabled when ttl workaround is needed, e.g
 		 * when ESWITCH_IPV4_TTL_MODIFY_ENABLE = true in mlxconfig
+		 * ===> this is not supported in SimX <===
 		 */
 		esw_warn(dev,
 			 "Tc chains and priorities offload aren't supported, check firmware version, or mlxconfig settings\n");

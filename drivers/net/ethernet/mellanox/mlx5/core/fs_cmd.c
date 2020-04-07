@@ -721,8 +721,8 @@ static int mlx5_cmd_packet_reformat_alloc(struct mlx5_flow_root_namespace *ns,
 		max_encap_size = MLX5_CAP_FLOWTABLE(dev, max_encap_header_size);
 
 	if (size > max_encap_size) {
-		mlx5_core_warn(dev, "encap size %zd too big, max supported is %d\n",
-			       size, max_encap_size);
+		mlx5_core_warn(dev, "encap size %zd too big, max supported is %d, for FDB it is %d\n",
+			       size, max_encap_size, MLX5_CAP_ESW(dev, max_encap_header_size));
 		return -EINVAL;
 	}
 

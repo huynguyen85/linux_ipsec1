@@ -4,6 +4,7 @@
 #include "ipsec_steering.h"
 #include "fs.h"
 #include "fs_core.h"
+#include "eswitch.h"
 
 static int mlx5e_add_ipsec_copy_action_rule(struct mlx5e_priv *priv,
 					    enum accel_fs_type type)
@@ -214,7 +215,7 @@ out_err:
 	return err;
 }
 
-int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv, struct mlx5e_ipsec_sa_entry *sa_entry)
+int mlx5e_xfrm_add_rule_org(struct mlx5e_priv *priv, struct mlx5e_ipsec_sa_entry *sa_entry)
 {
 	struct mlx5_accel_esp_xfrm_attrs *attrs = &sa_entry->xfrm->attrs;
 	u8 action[MLX5_UN_SZ_BYTES(set_add_copy_action_in_auto)] = {};
@@ -226,6 +227,7 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv, struct mlx5e_ipsec_sa_entry *sa
 	struct mlx5_flow_act flow_act = {0};
 	struct mlx5_flow_spec *spec = NULL;
 	struct mlx5e_flow_table *fs_t;
+	u16 ethertype;
 	u8 ip_version;
 	int err = 0;
 
@@ -308,6 +310,211 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv, struct mlx5e_ipsec_sa_entry *sa
 		       0xff, 16);
 	}
 
+	flow_act.ipsec_obj_id = sa_ctx->ipsec_obj_id;
+
+	if (attrs->action == MLX5_ACCEL_ESP_ACTION_DECRYPT) {
+		flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST |
+				  MLX5_FLOW_CONTEXT_ACTION_IPSEC_DECRYPT |
+				  MLX5_FLOW_CONTEXT_ACTION_MOD_HDR;
+		dest.type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
+		flow_act.modify_hdr = modify_hdr;
+		if (ethertype == ETH_P_IP) {
+			fs_t = &priv->fs.accel.accel_tables[ACCEL_FS_IPV4_ESP];
+			dest.ft = priv->fs.accel.ipsec_default[IPV4_ESP].ft_rx_err.t;
+		} else {
+			fs_t = &priv->fs.accel.accel_tables[ACCEL_FS_IPV6_ESP];
+			dest.ft = priv->fs.accel.ipsec_default[IPV6_ESP].ft_rx_err.t;
+		}
+
+		rule_tmp = mlx5_add_flow_rules(fs_t->t, spec,
+					       &flow_act, &dest, 1);
+	} else {
+		/* Add IPsec indicator in metdata_reg_a */
+		spec->match_criteria_enable |= MLX5_MATCH_MISC_PARAMETERS_2;
+		MLX5_SET(fte_match_param, spec->match_criteria, misc_parameters_2.metadata_reg_a,
+			 MLX5_ETH_WQE_FT_META_IPSEC);
+		MLX5_SET(fte_match_param, spec->match_value, misc_parameters_2.metadata_reg_a,
+			 MLX5_ETH_WQE_FT_META_IPSEC);
+
+		flow_act.action = MLX5_FLOW_CONTEXT_ACTION_ALLOW |
+				  MLX5_FLOW_CONTEXT_ACTION_IPSEC_ENCRYPT;
+		rule_tmp = mlx5_add_flow_rules(priv->ipsec->ft_tx, spec,
+					       &flow_act, NULL, 0);
+	}
+
+	if (IS_ERR(rule_tmp)) {
+		if (attrs->action == MLX5_ACCEL_ESP_ACTION_DECRYPT)
+			mlx5_modify_header_dealloc(mdev, modify_hdr);
+		err = PTR_ERR(rule_tmp);
+		pr_err("Fail to add ipsec rule\n");
+	} else {
+		sa_entry->ipsec_rule.rule = rule_tmp;
+		sa_entry->ipsec_rule.set_modify_hdr = modify_hdr;
+	}
+
+out:
+	kvfree(spec);
+	return err;
+}
+
+/* changes need to be done here in case of full offload and MLX5_ACCEL_ESP_ACTION_ENCRYPT 
+ * - need to call mlx5_packet_reformat_alloc fs_core function (with needed parameters)
+ * - need to validate the seswitch mode is no (see vf lag for example)
+ * - need to add action for packet encap
+ * - need a way to dealloc pkt reformat context on demand
+ * - do i need to make sure that esw offload mode ?
+ *   23_3_2020:
+ *   - the change in plan that it is needed to add to fdb (so need to be in swithcdev mode):
+ *     - the ip xfrm rule need to be on the representor
+ *     - first stage will add the rule to flow table ft = mlx5_esw_chains_get_table(esw, 0, 1, 0);
+ *     - will add new fg to it that match on:
+ *      - 5 tuple and non-frag (maybe need to add once)
+ *     - will add values as bellow
+ *     - action for Tx only path is encrypt and modify header for encapsulation and FW to the uplink
+ *     - struct mlx5_flow_table * ft = mlx5_esw_chains_get_table(esw, 0, 1, 0);
+ *   */
+
+int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv,
+			struct mlx5e_ipsec_sa_entry *sa_entry)
+{
+	u8 action[MLX5_UN_SZ_BYTES(set_add_copy_action_in_auto)] = {};
+	struct mlx5_accel_esp_xfrm_attrs *attrs = &sa_entry->xfrm->attrs;
+	struct mlx5_ipsec_sa_ctx *sa_ctx = sa_entry->hw_context;
+	struct mlx5_modify_hdr *modify_hdr = NULL;
+	struct mlx5_pkt_reformat *pkt_reformat = NULL;
+	struct mlx5_flow_handle *rule_tmp = NULL;
+	struct mlx5_core_dev *mdev = priv->mdev;
+	struct mlx5_flow_destination dest = {};
+	struct mlx5_flow_act flow_act = {0};
+	struct mlx5_flow_spec *spec = NULL;
+	struct mlx5e_flow_table *fs_t;
+	struct mlx5e_ipsec *ipsec = priv->ipsec; //fast_fdb (legacy_fdb we use)
+	u16 ethertype;
+	u8 ip_version;
+	int err = 0;
+	printk("mlx5e_xfrm_add_rule enter\n");
+
+	if(!mlx5_is_ipsec_device(mdev))
+		return 0;
+	/*
+	 * TBD: check on attrs->flags & MLX5_ACCEL_ESP_FLAGS_FULL_OFFLOAD to set steering rules of full offload
+	 * need to query cap for ipsec_full
+	 * for TX:
+	 * - table: FDB
+	 * - match criteria 5 tuple
+	 * - actions: encap (pkt reformat with context), MLX5_FLOW_CONTEXT_ACTION_ALLOW, MLX5_FLOW_CONTEXT_ACTION_IPSEC_ENCRYPT;
+	 * - trailer insertion in data path removal
+	 *   Experiment:
+	 *   	reuse the inline Offload flag for TX
+	 *   	your side: SW IPsec RX, Full offload IPsec TX
+	 *   	the other side: SW IPsec RX/TX
+	 * - simillar to Rx flow need to have aditional table for tx to match on ASO register returned syndrom (if not oki count and drop)
+	 *   HCA_CAP.reformat_add_esp_trasport in FT cap to support transport esp
+	 * a.The ASO return register defines 2 metadata steering registers of type C.
+	 * The exact register IDs are selected by the
+	 * IPsec Offload context. The even register will
+	 * get the syndrome while the odd register will
+	 * get the ESP.seuence number
+	 * */
+
+	ethertype = (attrs->is_ipv6) ? ETH_P_IPV6 : ETH_P_IP;
+
+	spec = kvzalloc(sizeof(*spec), GFP_KERNEL);
+	if (!spec) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	/* Set 1  bit ipsec marker */
+	/* Set 24 bit ipsec_obj_id */
+	sa_ctx->set_modify_hdr = NULL;
+	if (attrs->action == MLX5_ACCEL_ESP_ACTION_DECRYPT) {
+		MLX5_SET(set_action_in,
+			 action,
+			 action_type,
+			 MLX5_ACTION_TYPE_SET);
+		MLX5_SET(set_action_in, action,
+			 field,
+			 MLX5_ACTION_IN_FIELD_METADATA_REG_B);
+		MLX5_SET(set_action_in, action, data, (sa_ctx->ipsec_obj_id << 1) | 0x1);
+		MLX5_SET(set_action_in, action, offset, 7);
+		MLX5_SET(set_action_in, action, length, 25);
+
+		modify_hdr = mlx5_modify_header_alloc(mdev,
+						      MLX5_FLOW_NAMESPACE_KERNEL,
+						      1,
+						      action);
+
+		if (IS_ERR(modify_hdr)) {
+			mlx5_core_err(mdev, "fail to alloc ipsec set modify_header_id\n");
+			err = PTR_ERR(modify_hdr);
+			goto out;
+		}
+	}
+
+	/* remove misc params, no match on spi as it is HW generated */
+	//spec->match_criteria_enable = MLX5_MATCH_OUTER_HEADERS | MLX5_MATCH_MISC_PARAMETERS;
+	// #ft match criteria value, action: encrypt , pkt reforamt;  dst: uplink vport (0xffff)
+	// printk("%s:%d - .\n", __func__, __LINE__);
+	spec->match_criteria_enable = MLX5_MATCH_OUTER_HEADERS;
+
+	/* Ethertype */
+	MLX5_SET_TO_ONES(fte_match_param, spec->match_criteria,
+			 outer_headers.ethertype);
+	MLX5_SET(fte_match_param, spec->match_value, outer_headers.ethertype,
+		 ethertype);
+
+	/* Non fragmented */
+	MLX5_SET_TO_ONES(fte_match_param, spec->match_criteria,
+			 outer_headers.frag);
+	MLX5_SET(fte_match_param, spec->match_value, outer_headers.frag, 0);
+
+	/* ESP header  - to remove hw generated
+	MLX5_SET_TO_ONES(fte_match_param, spec->match_criteria,
+			 outer_headers.ip_protocol);
+	MLX5_SET(fte_match_param, spec->match_value, outer_headers.ip_protocol,
+		 IPPROTO_ESP);
+	*/
+
+	/* SPI number  - to remove  but this will be used as th header for packet reformat data
+	MLX5_SET_TO_ONES(fte_match_param, spec->match_criteria,
+			 misc_parameters.outer_esp_spi);
+	MLX5_SET(fte_match_param, spec->match_value, misc_parameters.outer_esp_spi,
+		 cpu_to_be32(attrs->spi));
+*/
+
+	if (ethertype == ETH_P_IP) {
+		memcpy(MLX5_ADDR_OF(fte_match_param, spec->match_value,
+				    outer_headers.src_ipv4_src_ipv6.ipv4_layout.ipv4),
+		       &attrs->saddr.a4,
+		       4);
+		memcpy(MLX5_ADDR_OF(fte_match_param, spec->match_value,
+				    outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4),
+		       &attrs->daddr.a4,
+		       4);
+		MLX5_SET_TO_ONES(fte_match_param, spec->match_criteria,
+				 outer_headers.src_ipv4_src_ipv6.ipv4_layout.ipv4);
+		MLX5_SET_TO_ONES(fte_match_param, spec->match_criteria,
+				 outer_headers.dst_ipv4_dst_ipv6.ipv4_layout.ipv4);
+	} else {
+		memcpy(MLX5_ADDR_OF(fte_match_param, spec->match_value,
+				    outer_headers.src_ipv4_src_ipv6.ipv6_layout.ipv6),
+		       &attrs->saddr.a6,
+		       16);
+		memcpy(MLX5_ADDR_OF(fte_match_param, spec->match_value,
+				    outer_headers.dst_ipv4_dst_ipv6.ipv6_layout.ipv6),
+		       &attrs->daddr.a6,
+		       16);
+		memset(MLX5_ADDR_OF(fte_match_param, spec->match_criteria,
+				    outer_headers.src_ipv4_src_ipv6.ipv6_layout.ipv6),
+		       0xff,
+		       16);
+		memset(MLX5_ADDR_OF(fte_match_param, spec->match_criteria,
+				    outer_headers.dst_ipv4_dst_ipv6.ipv6_layout.ipv6),
+		       0xff,
+		       16);
+	}
+
 	/* XFRM_OFFLOAD_INBOUND destination is error FT.
 	 * Outbound action is ALLOW.
 	 */
@@ -334,32 +541,63 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv, struct mlx5e_ipsec_sa_entry *sa
 
 		rule_tmp = mlx5_add_flow_rules(fs_t->t, spec, &flow_act, &dest, 1);
 	} else {
-		/* Add IPsec indicator in metdata_reg_a */
+		char * reformatbf = kzalloc(16, GFP_KERNEL);
+		struct mlx5_flow_destination dest = {};
+		struct mlx5_eswitch *esw = mdev->priv.eswitch;
+		/* Add IPsec indicator in metdata_reg_a - non need the driver gets plain text to remove
 		spec->match_criteria_enable |= MLX5_MATCH_MISC_PARAMETERS_2;
 		MLX5_SET(fte_match_param,
 			 spec->match_criteria, misc_parameters_2.metadata_reg_a,
 			 MLX5_ETH_WQE_FT_META_IPSEC);
 		MLX5_SET(fte_match_param, spec->match_value, misc_parameters_2.metadata_reg_a,
 			 MLX5_ETH_WQE_FT_META_IPSEC);
-
-		flow_act.action = MLX5_FLOW_CONTEXT_ACTION_ALLOW |
+		*/
+		/*
+		 * add action of packet reformat with packet reformat ctx for encap the packet
+		 * mlx5_packet_reformat_alloc to call with:
+		 * mlx5_packet_reformat_alloc (core dev, reformat_type, 8B (reformat, ESP header, priv->fs.egress_ns)
+		 * mlx5_packet_reformat_alloc (mdev, MLX5_REFORMAT_TYPE_ADD_ESP_TRANSPORT (type), 8B size, ESP hdr (SPI + seq num), priv->fs.egress_ns)
+		 * 8Byte data: (struct mlx5_accel_esp_xfrm_attrs *attrs)->spi/seq
+		 * flow_act.pkt_reformat = mlx5_packet_reformat_alloc(...)
+		 */
+		memcpy(reformatbf, &attrs->spi, 4);
+		memcpy(reformatbf + 4, &attrs->seq, 4);
+		print_hex_dump(KERN_WARNING, "", DUMP_PREFIX_OFFSET, 16, 1, reformatbf, 16, false);
+		flow_act.pkt_reformat = mlx5_packet_reformat_alloc(mdev, MLX5_REFORMAT_TYPE_ADD_ESP_TRANSPORT, 16, reformatbf, MLX5_FLOW_NAMESPACE_FDB);
+		kfree(reformatbf);
+		if (IS_ERR(flow_act.pkt_reformat)) {
+			printk("%s:%d - mlx5_packet_reformat_alloc failed .\n",__func__ , __LINE__);
+			err = PTR_ERR(flow_act.pkt_reformat);
+			goto out_modify_header;
+		}
+		pkt_reformat = flow_act.pkt_reformat;
+		flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST | MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT |
 				  MLX5_FLOW_CONTEXT_ACTION_IPSEC_ENCRYPT;
-		rule_tmp = mlx5_add_flow_rules(priv->ipsec->ft_tx, spec,
-					       &flow_act, NULL, 0);
+		memset(&dest, 0, sizeof(dest));
+		dest.type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
+		dest.vport.num = MLX5_VPORT_UPLINK;
+		ipsec->fast_fdb = esw->fdb_table.legacy.fdb; //esw->fdb_table.offloads.slow_fdb; //mlx5_esw_chains_get_table(esw, 0, 0, 0);
+		printk("%s:%d - ipsec->fast_fdb (legacy fdb) id %#04X .\n",__func__ , __LINE__, ipsec->fast_fdb->id);
+		rule_tmp = mlx5_add_flow_rules( ipsec->fast_fdb, spec,
+					       &flow_act, &dest, 1);
 	}
 
 	if (IS_ERR(rule_tmp)) {
 		err = PTR_ERR(rule_tmp);
-		mlx5_core_err(mdev, "fail to add ipsec rule attrs->action=0x%x, ip_version=%d\n",
-			      attrs->action, ip_version);
-		goto out_modify_header;
+		mlx5_core_err(mdev, "fail to add ipsec rule attrs->action=0x%x, ip_version=%d, err = %d\n",
+			      attrs->action, ip_version, err);
+		goto out_pkt_rfrmt;
 	} else {
 		sa_entry->ipsec_rule.rule = rule_tmp;
 		sa_entry->ipsec_rule.set_modify_hdr = modify_hdr;
+		sa_entry->ipsec_rule.pkt_reformat = pkt_reformat;
 	}
 
 	goto out;
 
+out_pkt_rfrmt:
+	if (flow_act.pkt_reformat)
+		mlx5_packet_reformat_dealloc(mdev, flow_act.pkt_reformat);
 out_modify_header:
 	if (attrs->action == MLX5_ACCEL_ESP_ACTION_DECRYPT)
 		mlx5_modify_header_dealloc(mdev, modify_hdr);
@@ -378,6 +616,11 @@ void mlx5e_xfrm_del_rule(struct mlx5e_priv *priv, struct mlx5e_ipsec_sa_entry *s
 	if (sa_entry->ipsec_rule.set_modify_hdr) {
 		mlx5_modify_header_dealloc(priv->mdev, sa_entry->ipsec_rule.set_modify_hdr);
 		sa_entry->ipsec_rule.set_modify_hdr = NULL;
+	}
+
+	if (sa_entry->ipsec_rule.pkt_reformat) {
+		mlx5_packet_reformat_dealloc(priv->mdev, sa_entry->ipsec_rule.pkt_reformat);
+		sa_entry->ipsec_rule.pkt_reformat = NULL;
 	}
 }
 

@@ -30,6 +30,8 @@
  * SOFTWARE.
  */
 
+#define DEBUG_FL(format,...) printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__)
+
 #include <linux/mutex.h>
 #include <linux/mlx5/driver.h>
 #include <linux/mlx5/vport.h>
@@ -1152,6 +1154,8 @@ mlx5_create_auto_grouped_flow_table(struct mlx5_flow_namespace *ns,
 	if (IS_ERR(ft))
 		return ft;
 
+	
+	DEBUG_FL("ft->autogroup.active = true for ft-id = %d", ft->id);
 	ft->autogroup.active = true;
 	ft->autogroup.required_groups = max_num_groups;
 	ft->autogroup.max_fte = autogroups_max_fte;
@@ -1356,8 +1360,11 @@ static struct mlx5_flow_group *alloc_auto_flow_group(struct mlx5_flow_table  *ft
 	unsigned int group_size = 0;
 	struct mlx5_flow_group *fg;
 
-	if (!ft->autogroup.active)
+	DEBUG_FL("Enter with ft->id = %#04X",ft->id);
+	if (!ft->autogroup.active) {
+		DEBUG_FL("err out with %d", -ENOENT);
 		return ERR_PTR(-ENOENT);
+	}
 
 	if (ft->autogroup.num_groups < ft->autogroup.required_groups)
 		group_size = ft->autogroup.group_size;
@@ -1854,8 +1861,10 @@ search_again_locked:
 
 	g = alloc_auto_flow_group(ft, spec);
 	if (IS_ERR(g)) {
+		/* this call fails */
 		rule = ERR_CAST(g);
 		up_write_ref_node(&ft->node, false);
+		DEBUG_FL("err out");
 		return rule;
 	}
 
@@ -1863,6 +1872,7 @@ search_again_locked:
 	if (IS_ERR(fte)) {
 		up_write_ref_node(&ft->node, false);
 		err = PTR_ERR(fte);
+		DEBUG_FL("err out");
 		goto err_alloc_fte;
 	}
 
@@ -1886,9 +1896,11 @@ search_again_locked:
 	return rule;
 
 err_release_fg:
+	DEBUG_FL("err out");
 	up_write_ref_node(&g->node, false);
 	kmem_cache_free(steering->ftes_cache, fte);
 err_alloc_fte:
+	DEBUG_FL("err out");
 	tree_put_node(&g->node, false);
 	return ERR_PTR(err);
 }
@@ -1914,6 +1926,7 @@ mlx5_add_flow_rules(struct mlx5_flow_table *ft,
 	u32 sw_action = flow_act->action;
 	struct fs_prio *prio;
 
+
 	if (!spec)
 		spec = &zero_spec;
 
@@ -1937,7 +1950,9 @@ mlx5_add_flow_rules(struct mlx5_flow_table *ft,
 		}
 	}
 
+//	DEBUG_FL("Calling _mlx5_add_flow_rules");
 	handle = _mlx5_add_flow_rules(ft, spec, flow_act, dest, num_dest);
+//	DEBUG_FL("post calling _mlx5_add_flow_rules , out with ERROR %d ", PTR_ERR(handle));
 
 	if (sw_action == MLX5_FLOW_CONTEXT_ACTION_FWD_NEXT_PRIO) {
 		if (!IS_ERR_OR_NULL(handle) &&
@@ -3071,6 +3086,7 @@ void mlx5_modify_header_dealloc(struct mlx5_core_dev *dev,
 }
 EXPORT_SYMBOL(mlx5_modify_header_dealloc);
 
+/* the most highlevel to call */
 struct mlx5_pkt_reformat *mlx5_packet_reformat_alloc(struct mlx5_core_dev *dev,
 						     int reformat_type,
 						     size_t size,

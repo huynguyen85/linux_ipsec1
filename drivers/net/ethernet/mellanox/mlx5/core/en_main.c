@@ -5304,6 +5304,7 @@ void mlx5e_netdev_cleanup(struct net_device *netdev, struct mlx5e_priv *priv)
 	free_cpumask_var(priv->scratchpad.cpumask);
 }
 
+#define DEBUG_FL(format,...) if(0) {printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__);}
 struct net_device *mlx5e_create_netdev(struct mlx5_core_dev *mdev,
 				       const struct mlx5e_profile *profile,
 				       int nch,
@@ -5320,11 +5321,13 @@ struct net_device *mlx5e_create_netdev(struct mlx5_core_dev *mdev,
 		return NULL;
 	}
 
+	DEBUG_FL("calling profile init");
 	err = profile->init(mdev, netdev, profile, ppriv);
 	if (err) {
 		mlx5_core_err(mdev, "failed to init mlx5e profile %d\n", err);
 		goto err_free_netdev;
 	}
+	DEBUG_FL(" POST calling prifile init");
 
 	return netdev;
 

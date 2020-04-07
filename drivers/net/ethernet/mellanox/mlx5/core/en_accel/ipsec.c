@@ -42,6 +42,7 @@
 #include "en_accel/ipsec_rxtx.h"
 #include "en_accel/ipsec_steering.h"
 
+#define DEBUG_FL(format,...) printk("%s:%d - "format,__func__,__LINE__,##__VA_ARGS__)
 static struct mlx5e_ipsec_sa_entry *to_ipsec_sa_entry(struct xfrm_state *x)
 {
 	struct mlx5e_ipsec_sa_entry *sa;
@@ -196,6 +197,10 @@ mlx5e_ipsec_build_accel_xfrm_attrs(struct mlx5e_ipsec_sa_entry *sa_entry,
 			MLX5_ACCEL_ESP_FLAGS_TRANSPORT :
 			MLX5_ACCEL_ESP_FLAGS_TUNNEL;
 
+	/* full offload */
+	//attrs->flags |= (x->xso.flags & XFRM_OFFLOAD_FULL) ? MLX5_ACCEL_ESP_FLAGS_FULL_OFFLOAD : 0;
+	attrs->flags |= MLX5_ACCEL_ESP_FLAGS_FULL_OFFLOAD;
+
 	/* spi */
 	attrs->spi = x->id.spi;
 
@@ -336,6 +341,13 @@ static int mlx5e_xfrm_add_state(struct xfrm_state *x)
 	if (err)
 		goto err_hw_ctx;
 
+	/* Add the SA to handle processed incoming packets before the add SA
+	 * completion was received
+	 * this is oki because the stack
+	 * xfrm_add_sa -> xfrm_state_construct -> xfrm_dev_state_add (net/xfrm/xfrm_device.c)
+	 *            |->x->km.state = XFRM_STATE_VALID (only post device success this will make all packetd to be dropped on Tx/Rx
+	 *            | this is true for all new sa's (see xfrm_input for dropping packet))
+	 */
 	if (x->xso.flags & XFRM_OFFLOAD_INBOUND) {
 		err = mlx5e_ipsec_sadb_rx_add(sa_entry, sa_handle);
 		if (err)
@@ -416,7 +428,7 @@ int mlx5e_ipsec_init(struct mlx5e_priv *priv)
 		kfree(ipsec);
 		return -ENOMEM;
 	}
-	netdev_dbg(priv->netdev, "IPSec attached to netdevice\n");
+	DEBUG_FL("IPSec attached to netdevice\n");
 	return 0;
 }
 
@@ -517,7 +529,7 @@ void mlx5e_ipsec_build_netdev(struct mlx5e_priv *priv)
 		return;
 	}
 
-	mlx5_core_info(mdev, "mlx5e: IPSec ESP acceleration enabled\n");
+	mlx5_core_info(mdev, "mlx5e: IPSec ESP acceleration enabled for device %s\n", netdev_name(netdev));
 	netdev->xfrmdev_ops = &mlx5e_ipsec_xfrmdev_ops;
 	netdev->features |= NETIF_F_HW_ESP;
 	netdev->hw_enc_features |= NETIF_F_HW_ESP;

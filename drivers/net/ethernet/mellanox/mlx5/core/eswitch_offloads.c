@@ -44,6 +44,7 @@
 #include "lib/devcom.h"
 #include "lib/eq.h"
 
+#define DEBUG_FL(format,...) printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__)
 /* There are two match-all miss flows, one for unicast dst mac and
  * one for multicast.
  */
@@ -356,6 +357,41 @@ mlx5_eswitch_add_offloaded_rule(struct mlx5_eswitch *esw,
 				if (MLX5_CAP_ESW(esw->dev, merged_eswitch))
 					dest[i].vport.flags |=
 						MLX5_FLOW_DEST_VPORT_VHCA_ID;
+/*
+ * need a dest flag of MLX5_ESW_DEST_ENCAP, and ESW offload table FDB and pkt_reformat context
+ * the pkt_reformat should look like:
+ *  --  look at mlx5_packet_reformat_alloc
+ * drivers/net/ethernet/mellanox/mlx5/core/fs_cmd.c:867:   .packet_reformat_alloc = mlx5_cmd_packet_reformat_alloc,
+ * mlx5_packet_reformat_alloc (fs_core.c) :
+the highest level at fs_core
+struct mlx5_pkt_reformat *mlx5_packet_reformat_alloc(struct mlx5_core_dev *dev,
+                                                     int reformat_type, // MLX5_REFORMAT_TYPE_ADD_ESP_TRANSPORT
+                                                     size_t size, //8B
+                                                     void *reformat_data, //ESP header buffer
+                                                     enum mlx5_flow_namespace_type ns_type)// MLX5_FLOW_NAMESPACE_OFFLOADS
+
+
+ * mlx5_cmd_packet_reformat_alloc( struct mlx5_flow_root_namespace *ns,
+                                   int reformat_type,
+                                   size_t size,
+                                   void *reformat_data,
+                                   enum mlx5_flow_namespace_type namespace,
+                                  struct mlx5_pkt_reformat *pkt_reformat);
+   so this call should be something like ->packet_reformat_alloc( root ns of MLX5_FLOW_NAMESPACE_OFFLOADS,
+								  MLX5_REFORMAT_TYPE_ADD_ESP_TRANSPORT,
+							          8 byte (ESP header, spi + seq num),
+								  buffer for spi + seqn,
+								  MLX5_FLOW_NAMESPACE_OFFLOADS,
+                                                                  pkt_reformat input and id as output place holder);
+   struct mlx5_pkt_reformat {
+	enum mlx5_flow_namespace_type ns_type; // MLX5_FLOW_NAMESPACE_OFFLOADS,ns->packet_reformat_alloc will be used
+        int reformat_type; // MLX5_REFORMAT_TYPE_ADD_ESP_TRANSPORT
+        union {
+                struct mlx5_fs_dr_action action;
+                u32 id; // is the id of the pkt_reformat context this we get post calling packet_reformat_alloc of the fdb ns
+        };
+     };
+ */
 				if (attr->dests[j].flags & MLX5_ESW_DEST_ENCAP) {
 					flow_act.action |= MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT;
 					flow_act.pkt_reformat = attr->dests[j].pkt_reformat;
@@ -1147,9 +1183,11 @@ static int esw_create_offloads_fdb_tables(struct mlx5_eswitch *esw, int nvports)
 	int table_size, ix, err = 0;
 	struct mlx5_flow_group *g;
 	void *match_criteria;
+	void *outer_headers_c;
 	u8 *dmac;
 
-	esw_debug(esw->dev, "Create offloads FDB Tables\n");
+	DEBUG_FL("Create offloads FDB Tables\n");
+	/* create fdb tables */
 
 	flow_group_in = kvzalloc(inlen, GFP_KERNEL);
 	if (!flow_group_in)
@@ -1168,9 +1206,10 @@ static int esw_create_offloads_fdb_tables(struct mlx5_eswitch *esw, int nvports)
 		esw_warn(dev, "Failed to set FDB namespace steering mode\n");
 		goto ns_err;
 	}
+#define IPSEC_ENTRIES 10
 
 	table_size = nvports * MAX_SQ_NVPORTS + MAX_PF_SQ +
-		MLX5_ESW_MISS_FLOWS + esw->total_vports;
+		MLX5_ESW_MISS_FLOWS + esw->total_vports + IPSEC_ENTRIES;
 
 	/* create the slow path fdb with encap set, so further table instances
 	 * can be created at run time while VFs are probed if the FW allows that.
@@ -1190,14 +1229,42 @@ static int esw_create_offloads_fdb_tables(struct mlx5_eswitch *esw, int nvports)
 		goto slow_fdb_err;
 	}
 	esw->fdb_table.offloads.slow_fdb = fdb;
+	DEBUG_FL("Create offloads FDB Tables with fdb->id = %#02X\n", fdb->id);
 
+/*
 	err = mlx5_esw_chains_create(esw);
 	if (err) {
 		esw_warn(dev, "Failed to create fdb chains err(%d)\n", err);
 		goto fdb_chains_err;
 	}
+	printk("%s:%d - mlx5_esw_chains_create passed.\n",__func__,__LINE__);
+*/
+	/* add group IPSEC 5 tubles out header */
+/*
+	memset(flow_group_in, 0, inlen);
+	MLX5_SET(create_flow_group_in, flow_group_in, match_criteria_enable, MLX5_MATCH_OUTER_HEADERS); 
+	match_criteria = MLX5_ADDR_OF(create_flow_group_in, flow_group_in, match_criteria);
+	outer_headers_c = MLX5_ADDR_OF(fte_match_param, match_criteria,
+				       outer_headers);
+	MLX5_SET_TO_ONES(fte_match_set_lyr_2_4, outer_headers_c, ethertype);
+	MLX5_SET_TO_ONES(fte_match_set_lyr_2_4, outer_headers_c, frag);
+	MLX5_SET_TO_ONES(fte_match_set_lyr_2_4, outer_headers_c,
+			src_ipv4_src_ipv6.ipv4_layout.ipv4);
+	MLX5_SET_TO_ONES(fte_match_set_lyr_2_4, outer_headers_c,
+			dst_ipv4_dst_ipv6.ipv4_layout.ipv4);
+	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index, 0);
+	MLX5_SET(create_flow_group_in, flow_group_in, end_flow_index, IPSEC_ENTRIES - 1);
+	g = mlx5_create_flow_group(fdb, flow_group_in);
+	if (IS_ERR(g)) {
+                err = PTR_ERR(g);
+                esw_warn(dev, "Failed to create IPsec  flow group err(%d)\n", err);
+                goto send_vport_err;
+        }
+	esw->fdb_table.offloads.ipsec_grp = g;
+*/
 
 	/* create send-to-vport group */
+	memset(flow_group_in, 0, inlen);
 	MLX5_SET(create_flow_group_in, flow_group_in, match_criteria_enable,
 		 MLX5_MATCH_MISC_PARAMETERS);
 
@@ -1206,17 +1273,18 @@ static int esw_create_offloads_fdb_tables(struct mlx5_eswitch *esw, int nvports)
 	MLX5_SET_TO_ONES(fte_match_param, match_criteria, misc_parameters.source_sqn);
 	MLX5_SET_TO_ONES(fte_match_param, match_criteria, misc_parameters.source_port);
 
-	ix = nvports * MAX_SQ_NVPORTS + MAX_PF_SQ;
-	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index, 0);
+	ix = nvports * MAX_SQ_NVPORTS + MAX_PF_SQ + IPSEC_ENTRIES ;
+	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index, IPSEC_ENTRIES);
 	MLX5_SET(create_flow_group_in, flow_group_in, end_flow_index, ix - 1);
-
 	g = mlx5_create_flow_group(fdb, flow_group_in);
 	if (IS_ERR(g)) {
 		err = PTR_ERR(g);
 		esw_warn(dev, "Failed to create send-to-vport flow group err(%d)\n", err);
 		goto send_vport_err;
 	}
+	DEBUG_FL("Create offloads FDB Tables with fdb->id = %d , post mlx5_create_flow_group ft->autogroup.active = %d\n", fdb->id, fdb->autogroup.active);
 	esw->fdb_table.offloads.send_to_vport_grp = g;
+
 
 	/* create peer esw miss group */
 	memset(flow_group_in, 0, inlen);
@@ -1304,11 +1372,12 @@ static void esw_destroy_offloads_fdb_tables(struct mlx5_eswitch *esw)
 	esw_debug(esw->dev, "Destroy offloads FDB Tables\n");
 	mlx5_del_flow_rules(esw->fdb_table.offloads.miss_rule_multi);
 	mlx5_del_flow_rules(esw->fdb_table.offloads.miss_rule_uni);
+//	mlx5_destroy_flow_group(esw->fdb_table.offloads.ipsec_grp);
 	mlx5_destroy_flow_group(esw->fdb_table.offloads.send_to_vport_grp);
 	mlx5_destroy_flow_group(esw->fdb_table.offloads.peer_miss_grp);
 	mlx5_destroy_flow_group(esw->fdb_table.offloads.miss_grp);
 
-	mlx5_esw_chains_destroy(esw);
+	//mlx5_esw_chains_destroy(esw);
 	mlx5_destroy_flow_table(esw->fdb_table.offloads.slow_fdb);
 	/* Holds true only as long as DMFS is the default */
 	mlx5_flow_namespace_set_mode(esw->fdb_table.offloads.ns,
@@ -1574,6 +1643,8 @@ static int esw_offloads_start(struct mlx5_eswitch *esw,
 {
 	int err, err1;
 
+	DEBUG_FL("Enter");
+
 	if (esw->mode != MLX5_ESWITCH_LEGACY &&
 	    !mlx5_core_is_ecpf_esw_manager(esw->dev)) {
 		NL_SET_ERR_MSG_MOD(extack,
@@ -1601,6 +1672,7 @@ static int esw_offloads_start(struct mlx5_eswitch *esw,
 					   "Inline mode is different between vports");
 		}
 	}
+	DEBUG_FL("OUT with error %d ",err);
 	return err;
 }
 
@@ -2207,6 +2279,7 @@ static int esw_offloads_steering_init(struct mlx5_eswitch *esw)
 	int total_vports;
 	int err;
 
+	/* look here for inited fdb */
 	if (mlx5_core_is_ecpf_esw_manager(esw->dev))
 		total_vports = esw->total_vports;
 	else
@@ -2335,17 +2408,22 @@ int esw_offloads_enable(struct mlx5_eswitch *esw)
 	int err, i;
 
 	if (MLX5_CAP_ESW_FLOWTABLE_FDB(esw->dev, reformat) &&
-	    MLX5_CAP_ESW_FLOWTABLE_FDB(esw->dev, decap))
+	    MLX5_CAP_ESW_FLOWTABLE_FDB(esw->dev, decap)) {
+		printk("%s:%d - DEVLINK_ESWITCH_ENCAP_MODE_BASIC (reformat and decap), enabled.\n", __func__, __LINE__);
 		esw->offloads.encap = DEVLINK_ESWITCH_ENCAP_MODE_BASIC;
-	else
+	} else {
+		printk("%s:%d - DEVLINK_ESWITCH_ENCAP_MODE_NONE .\n", __func__, __LINE__);
 		esw->offloads.encap = DEVLINK_ESWITCH_ENCAP_MODE_NONE;
+	}
 
 	mutex_init(&esw->offloads.termtbl_mutex);
 	mlx5_rdma_enable_roce(esw->dev);
+	DEBUG_FL("call esw_offloads_steering_init");
 	err = esw_offloads_steering_init(esw);
 	if (err)
 		goto err_steering_init;
 
+	DEBUG_FL("post call esw_offloads_steering_init err = %d",err);
 	err = esw_set_passing_vport_metadata(esw, true);
 	if (err)
 		goto err_vport_metadata;

@@ -101,11 +101,17 @@ mlx5_ipsec_esp_create_xfrm(struct mlx5_core_dev *mdev,
 	return &mxfrm->accel_xfrm;
 }
 
+enum {
+	MLX5_IPSEC_FLAG_INLINE_OFFLOAD,
+	MLX5_IPSEC_FLAG_FULL_OFFLOAD,
+};
+
 struct mlx5_ipsec_obj_attrs {
 	const struct aes_gcm_keymat *aes_gcm;
 	u32 accel_flags;
 	u32 esn_msb;
 	u32 enc_key_id;
+	u32 flags;
 };
 
 static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
@@ -116,6 +122,7 @@ static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
 	u32 out[MLX5_ST_SZ_DW(general_obj_out_cmd_hdr)];
 	u32 in[MLX5_ST_SZ_DW(create_ipsec_obj_in)] = {};
 	void *obj, *salt_p, *salt_iv_p;
+	void *aso_ctx;
 	int err;
 
 	obj = MLX5_ADDR_OF(create_ipsec_obj_in, in, ipsec_object);
@@ -151,12 +158,19 @@ static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
 	}
 
 	MLX5_SET(ipsec_obj, obj, dekn, attrs->enc_key_id);
+	MLX5_SET(ipsec_obj, obj, full_offload, attrs->flags & MLX5_IPSEC_FLAG_FULL_OFFLOAD);
+
 
 	/* general object fields set */
 	MLX5_SET(general_obj_in_cmd_hdr, in, opcode,
 		 MLX5_CMD_OP_CREATE_GENERAL_OBJECT);
 	MLX5_SET(general_obj_in_cmd_hdr, in, obj_type,
 		 MLX5_GENERAL_OBJECT_TYPES_IPSEC);
+
+	/* ASO context */
+	aso_ctx = MLX5_ADDR_OF(ipsec_obj, obj, ipsec_aso);
+	MLX5_SET(ipsec_aso, aso_ctx, valid, 1);
+	MLX5_SET(ipsec_aso, aso_ctx, mode, MLX5_IPSEC_ASO_INC_SN);
 
 	err = mlx5_cmd_exec(mdev, in, sizeof(in), out, sizeof(out));
 	if (!err)

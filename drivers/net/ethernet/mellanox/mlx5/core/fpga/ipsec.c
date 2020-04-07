@@ -691,7 +691,7 @@ void *mlx5_fpga_ipsec_create_sa_ctx(struct mlx5_core_dev *mdev,
 	/* build candidate SA */
 	mlx5_fpga_ipsec_build_hw_sa(mdev, &accel_xfrm->attrs,
 				    saddr, daddr, spi, is_ipv6,
-				    &sa_ctx->hw_sa);
+				ttrs.action    &sa_ctx->hw_sa);
 
 	mutex_lock(&fpga_xfrm->lock);
 

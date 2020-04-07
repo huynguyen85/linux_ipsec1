@@ -1561,6 +1561,7 @@ int mlx5e_create_flow_steering(struct mlx5e_priv *priv)
 		goto err_destroy_inner_ttc_table;
 	}
 
+	/* here we create the default Rx fts for accel (IPsec rx and deafult err)*/
 	err = mlx5e_accel_fs_create_tables(priv);
 	if (err)
 		netdev_err(priv->netdev, "Failed to create accel_fs tables, err=%d\n",

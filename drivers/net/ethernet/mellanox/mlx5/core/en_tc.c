@@ -1361,6 +1361,7 @@ mlx5e_tc_add_fdb_flow(struct mlx5e_priv *priv,
 	/* we get here if one of the following takes place:
 	 * (1) there's no error
 	 * (2) there's an encap action and we don't have valid neigh
+	 *  here we start the adding rule to fdb tables
 	 */
 	if (!encap_valid)
 		flow->rule[0] = mlx5e_tc_offload_to_slow_path(esw, flow, &parse_attr->spec);
@@ -4317,6 +4318,7 @@ mlx5e_tc_add_flow(struct mlx5e_priv *priv,
 	if (!tc_can_offload_extack(priv->netdev, f->common.extack))
 		return -EOPNOTSUPP;
 
+	/* in case of offloads here we add a flwo to fdb */
 	if (esw && esw->mode == MLX5_ESWITCH_OFFLOADS)
 		err = mlx5e_add_fdb_flow(priv, f, flow_flags,
 					 filter_dev, flow);

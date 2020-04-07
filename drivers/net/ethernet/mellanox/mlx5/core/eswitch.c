@@ -318,8 +318,9 @@ static int esw_create_legacy_fdb_table(struct mlx5_eswitch *esw)
 	u32 *flow_group_in;
 	u8 *dmac;
 	int err = 0;
+	void *outer_headers_c;
 
-	esw_debug(dev, "Create FDB log_max_size(%d)\n",
+	esw_debug(dev, "Create Legcy FDB log_max_size(%d)\n",
 		  MLX5_CAP_ESW_FLOWTABLE_FDB(dev, log_max_ft_size));
 
 	root_ns = mlx5_get_fdb_sub_ns(dev, 0);
@@ -342,13 +343,37 @@ static int esw_create_legacy_fdb_table(struct mlx5_eswitch *esw)
 		goto out;
 	}
 	esw->fdb_table.legacy.fdb = fdb;
+#define IPSEC_ENTRIES 10
+
+	/* add the code for ipsec group */
+	memset(flow_group_in, 0, inlen);
+	MLX5_SET(create_flow_group_in, flow_group_in, match_criteria_enable, MLX5_MATCH_OUTER_HEADERS); 
+	match_criteria = MLX5_ADDR_OF(create_flow_group_in, flow_group_in, match_criteria);
+	outer_headers_c = MLX5_ADDR_OF(fte_match_param, match_criteria,
+				       outer_headers);
+	MLX5_SET_TO_ONES(fte_match_set_lyr_2_4, outer_headers_c, ethertype);
+	MLX5_SET_TO_ONES(fte_match_set_lyr_2_4, outer_headers_c, frag);
+	MLX5_SET_TO_ONES(fte_match_set_lyr_2_4, outer_headers_c,
+			src_ipv4_src_ipv6.ipv4_layout.ipv4);
+	MLX5_SET_TO_ONES(fte_match_set_lyr_2_4, outer_headers_c,
+			dst_ipv4_dst_ipv6.ipv4_layout.ipv4);
+	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index, 0);
+	MLX5_SET(create_flow_group_in, flow_group_in, end_flow_index, IPSEC_ENTRIES - 1);
+	g = mlx5_create_flow_group(fdb, flow_group_in);
+	if (IS_ERR(g)) {
+                err = PTR_ERR(g);
+                esw_warn(dev, "Failed to create IPsec  flow group err(%d)\n", err);
+                goto out;
+        }
+	esw->fdb_table.legacy.ipsec_grp = g;
 
 	/* Addresses group : Full match unicast/multicast addresses */
+	memset(flow_group_in, 0, inlen);
 	MLX5_SET(create_flow_group_in, flow_group_in, match_criteria_enable,
 		 MLX5_MATCH_OUTER_HEADERS);
 	match_criteria = MLX5_ADDR_OF(create_flow_group_in, flow_group_in, match_criteria);
 	dmac = MLX5_ADDR_OF(fte_match_param, match_criteria, outer_headers.dmac_47_16);
-	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index, 0);
+	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index, IPSEC_ENTRIES);
 	/* Preserve 2 entries for allmulti and promisc rules*/
 	MLX5_SET(create_flow_group_in, flow_group_in, end_flow_index, table_size - 3);
 	eth_broadcast_addr(dmac);
@@ -422,6 +447,8 @@ static void esw_destroy_legacy_fdb_table(struct mlx5_eswitch *esw)
 		mlx5_destroy_flow_group(esw->fdb_table.legacy.allmulti_grp);
 	if (esw->fdb_table.legacy.addr_grp)
 		mlx5_destroy_flow_group(esw->fdb_table.legacy.addr_grp);
+	if (esw->fdb_table.legacy.ipsec_grp)
+		mlx5_destroy_flow_group(esw->fdb_table.legacy.ipsec_grp);
 	mlx5_destroy_flow_table(esw->fdb_table.legacy.fdb);
 
 	esw->fdb_table.legacy.fdb = NULL;
@@ -2096,7 +2123,9 @@ int mlx5_eswitch_enable(struct mlx5_eswitch *esw, int mode)
 	} else {
 		mlx5_reload_interface(esw->dev, MLX5_INTERFACE_PROTOCOL_ETH);
 		mlx5_reload_interface(esw->dev, MLX5_INTERFACE_PROTOCOL_IB);
+		DEBUG_FL("call esw_offloads_enable");
 		err = esw_offloads_enable(esw);
+		DEBUG_FL("call esw_offloads_enable - err = %d", err);
 	}
 
 	if (err)

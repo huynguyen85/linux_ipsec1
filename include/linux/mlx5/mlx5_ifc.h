@@ -2950,7 +2950,7 @@ enum {
 	MLX5_FLOW_CONTEXT_ACTION_DROP      = 0x2,
 	MLX5_FLOW_CONTEXT_ACTION_FWD_DEST  = 0x4,
 	MLX5_FLOW_CONTEXT_ACTION_COUNT     = 0x8,
-	MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT = 0x10,
+	MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT = 0x10, //this is the encap action type
 	MLX5_FLOW_CONTEXT_ACTION_DECAP     = 0x20,
 	MLX5_FLOW_CONTEXT_ACTION_MOD_HDR   = 0x40,
 	MLX5_FLOW_CONTEXT_ACTION_VLAN_POP  = 0x80,
@@ -5621,6 +5621,12 @@ enum mlx5_reformat_ctx_type {
 	MLX5_REFORMAT_TYPE_L2_TO_L2_TUNNEL = 0x2,
 	MLX5_REFORMAT_TYPE_L3_TUNNEL_TO_L2 = 0x3,
 	MLX5_REFORMAT_TYPE_L2_TO_L3_TUNNEL = 0x4,
+	MLX5_REFORMAT_TYPE_ADD_ESP_TRANSPORT = 0x5,
+	MLX5_REFORMAT_TYPE_L2_TO_L3_ESP_TUNNEL = 0x6,
+	MLX5_REFORMAT_TYPE_ADD_ESP_TRANSPORT_OVER_UDP = 0x7,
+	MLX5_REFORMAT_TYPE_DEL_ESP_TRANSPORT = 0x8,
+	MLX5_REFORMAT_TYPE_L3_ESP_TUNNEL_TO_L2 = 0x9,
+	MLX5_REFORMAT_TYPE_DEL_ESP_TRANSPORT_OVER_UDP = 0xA,
 };
 
 struct mlx5_ifc_alloc_packet_reformat_context_in_bits {
@@ -10498,9 +10504,58 @@ enum {
 };
 
 enum {
-	MLX5_IPSEC_OBJECT_ICV_LEN_16B,
-	MLX5_IPSEC_OBJECT_ICV_LEN_12B,
 	MLX5_IPSEC_OBJECT_ICV_LEN_8B,
+	MLX5_IPSEC_OBJECT_ICV_LEN_12B,
+	MLX5_IPSEC_OBJECT_ICV_LEN_16B,
+};
+
+enum {
+	MLX5_IPSEC_FULL_OFFLOAD = 0x1
+};
+
+//must comply wiht HCA_CAP.flow_meter_reg_id
+enum {
+	MLX5_IPSEC_ASO_REG_C_0_1 = 0x0,
+	MLX5_IPSEC_ASO_REG_C_2_3 = 0x1,
+	MLX5_IPSEC_ASO_REG_C_4_5 = 0x2,
+	MLX5_IPSEC_ASO_REG_C_6_7 = 0x3,
+};
+
+enum {
+	MLX5_IPSEC_ASO_MODE              = 0x0,
+	MLX5_IPSEC_ASO_REPLAY_PROTECTION = 0x1,
+	MLX5_IPSEC_ASO_INC_SN            = 0x2,
+};
+
+enum {
+	MLX5_IPSEC_ASO_REPLAY_WIN_32_BIT  = 0x0,
+	MLX5_IPSEC_ASO_REPLAY_WIN_64_BIT  = 0x1,
+	MLX5_IPSEC_ASO_REPLAY_WIN_128_BIT = 0x2,
+	MLX5_IPSEC_ASO_REPLAY_WIN_256_BIT = 0x3,
+};
+
+struct mlx5_ifc_ipsec_aso_bits {
+	u8         valid[0x1];
+	u8         reserved_at_201[0x1];
+	u8         mode[0x2];
+	u8         window_sz[0x2];
+	u8         soft_lft_arm[0x1];
+	u8         hard_lft_arm[0x1];
+	u8         remove_flow_enable[0x1];
+	u8         esn_event_arm[0x1];
+	u8         reserved_at_20a[0x16];
+
+	u8         remove_flow_pkt_cnt[0x20];
+
+	u8         remove_flow_soft_lft[0x20];
+
+	u8         reserved_at_260[0x80];
+
+	u8         mode_parameter[0x20];
+
+	u8         replay_protection_window[0x100];
+
+	u8         reserved_at_400[0x400];
 };
 
 struct mlx5_ifc_ipsec_obj_bits {
@@ -10524,7 +10579,9 @@ struct mlx5_ifc_ipsec_obj_bits {
 
 	u8         implicit_iv[0x40];
 
-	u8         reserved_at_100[0x700];
+	u8         reserved_at_100[0x100];
+
+	struct mlx5_ifc_ipsec_aso_bits ipsec_aso;
 };
 
 struct mlx5_ifc_create_ipsec_obj_in_bits {

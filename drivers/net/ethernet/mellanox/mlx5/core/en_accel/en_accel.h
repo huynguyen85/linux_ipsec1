@@ -139,8 +139,9 @@ static inline bool mlx5e_accel_tx_finish(struct mlx5e_priv *priv,
 
 #ifdef CONFIG_MLX5_EN_IPSEC
 	if (test_bit(MLX5E_SQ_STATE_IPSEC, &sq->state)) {
-		if (unlikely(!mlx5e_ipsec_handle_tx_skb(priv, &wqe->eth, skb)))
-			return false;
+		skb = mlx5e_ipsec_handle_tx_skb(priv->netdev, sq, wqe, skb);
+		if (unlikely(!skb))
+			return NULL;
 	}
 #endif
 

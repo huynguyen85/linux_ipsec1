@@ -2674,6 +2674,29 @@ int mlx5_devlink_eswitch_encap_mode_get(struct devlink *devlink,
 	return 0;
 }
 
+int mlx5_devlink_eswitch_ipsec_mode_set(struct devlink *devlink,
+					enum devlink_eswitch_ipsec_mode ipsec,
+					struct netlink_ext_ack *extack)
+{
+	struct mlx5_core_dev *dev = devlink_priv(devlink);
+	struct mlx5_eswitch *esw = dev->priv.eswitch;
+
+	printk("mlx5_devlink_eswitch_ipsec_mode_set, ipsec=%d\n", ipsec);
+	esw->offloads.ipsec_mode = ipsec;
+	return 0;
+}
+
+int mlx5_devlink_eswitch_ipsec_mode_get(struct devlink *devlink,
+					enum devlink_eswitch_ipsec_mode *ipsec)
+{
+	struct mlx5_core_dev *dev = devlink_priv(devlink);
+	struct mlx5_eswitch *esw = dev->priv.eswitch;
+
+	printk("mlx5_devlink_eswitch_ipsec_mode_get\n");
+	*ipsec = esw->offloads.ipsec_mode;
+	return 0;
+}
+
 static bool
 mlx5_eswitch_vport_has_rep(const struct mlx5_eswitch *esw, u16 vport_num)
 {

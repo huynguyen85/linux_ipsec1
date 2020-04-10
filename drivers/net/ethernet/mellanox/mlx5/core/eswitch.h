@@ -216,6 +216,7 @@ struct mlx5_esw_offload {
 	u8 inline_mode;
 	atomic64_t num_flows;
 	enum devlink_eswitch_encap_mode encap;
+	enum devlink_eswitch_ipsec_mode ipsec_mode;
 };
 
 /* E-Switch MC FDB table hash node */
@@ -442,6 +443,11 @@ int mlx5_devlink_eswitch_encap_mode_set(struct devlink *devlink,
 					struct netlink_ext_ack *extack);
 int mlx5_devlink_eswitch_encap_mode_get(struct devlink *devlink,
 					enum devlink_eswitch_encap_mode *encap);
+int mlx5_devlink_eswitch_ipsec_mode_set(struct devlink *devlink,
+					enum devlink_eswitch_ipsec_mode ipsec,
+					struct netlink_ext_ack *extack);
+int mlx5_devlink_eswitch_ipsec_mode_get(struct devlink *devlink,
+					enum devlink_eswitch_ipsec_mode *ipsec);
 void *mlx5_eswitch_get_uplink_priv(struct mlx5_eswitch *esw, u8 rep_type);
 
 int mlx5_eswitch_add_vlan_action(struct mlx5_eswitch *esw,

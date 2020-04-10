@@ -1596,6 +1596,7 @@ static int devlink_nl_eswitch_fill(struct sk_buff *msg, struct devlink *devlink,
 {
 	const struct devlink_ops *ops = devlink->ops;
 	enum devlink_eswitch_encap_mode encap_mode;
+	enum devlink_eswitch_ipsec_mode ipsec_mode;
 	u8 inline_mode;
 	void *hdr;
 	int err = 0;
@@ -1637,6 +1638,15 @@ static int devlink_nl_eswitch_fill(struct sk_buff *msg, struct devlink *devlink,
 			goto nla_put_failure;
 	}
 
+	if (ops->eswitch_ipsec_mode_get) {
+		err = ops->eswitch_ipsec_mode_get(devlink, &ipsec_mode);
+		if (err)
+			goto nla_put_failure;
+		err = nla_put_u8(msg, DEVLINK_ATTR_ESWITCH_IPSEC_MODE, ipsec_mode);
+		if (err)
+			goto nla_put_failure;
+	}
+
 	genlmsg_end(msg, hdr);
 	return 0;
 
@@ -1673,6 +1683,7 @@ static int devlink_nl_cmd_eswitch_set_doit(struct sk_buff *skb,
 	struct devlink *devlink = info->user_ptr[0];
 	const struct devlink_ops *ops = devlink->ops;
 	enum devlink_eswitch_encap_mode encap_mode;
+	enum devlink_eswitch_ipsec_mode ipsec_mode;
 	u8 inline_mode;
 	int err = 0;
 	u16 mode;
@@ -1702,6 +1713,17 @@ static int devlink_nl_cmd_eswitch_set_doit(struct sk_buff *skb,
 			return -EOPNOTSUPP;
 		encap_mode = nla_get_u8(info->attrs[DEVLINK_ATTR_ESWITCH_ENCAP_MODE]);
 		err = ops->eswitch_encap_mode_set(devlink, encap_mode,
+						  info->extack);
+		if (err)
+			return err;
+	}
+
+	if (info->attrs[DEVLINK_ATTR_ESWITCH_IPSEC_MODE]) {
+		if (!ops->eswitch_ipsec_mode_set)
+			return -EOPNOTSUPP;
+		ipsec_mode = nla_get_u8(info->attrs[DEVLINK_ATTR_ESWITCH_IPSEC_MODE]);
+		printk("DEVLINK_ATTR_ESWITCH_IPSEC_MODE ipsec_mode=%d\n", ipsec_mode);
+		err = ops->eswitch_ipsec_mode_set(devlink, ipsec_mode,
 						  info->extack);
 		if (err)
 			return err;
@@ -6053,6 +6075,7 @@ static const struct nla_policy devlink_nl_policy[DEVLINK_ATTR_MAX + 1] = {
 	[DEVLINK_ATTR_NETNS_PID] = { .type = NLA_U32 },
 	[DEVLINK_ATTR_NETNS_FD] = { .type = NLA_U32 },
 	[DEVLINK_ATTR_NETNS_ID] = { .type = NLA_U32 },
+	[DEVLINK_ATTR_ESWITCH_IPSEC_MODE] = { .type = NLA_U8 },
 };
 
 static const struct genl_ops devlink_nl_ops[] = {

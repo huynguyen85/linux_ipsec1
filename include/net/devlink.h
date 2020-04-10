@@ -781,6 +781,11 @@ struct devlink_ops {
 	int (*eswitch_encap_mode_set)(struct devlink *devlink,
 				      enum devlink_eswitch_encap_mode encap_mode,
 				      struct netlink_ext_ack *extack);
+	int (*eswitch_ipsec_mode_get)(struct devlink *devlink,
+				      enum devlink_eswitch_ipsec_mode *p_ipsec_mode);
+	int (*eswitch_ipsec_mode_set)(struct devlink *devlink,
+				      enum devlink_eswitch_ipsec_mode ipsec_mode,
+				      struct netlink_ext_ack *extack);
 	int (*info_get)(struct devlink *devlink, struct devlink_info_req *req,
 			struct netlink_ext_ack *extack);
 	int (*flash_update)(struct devlink *devlink, const char *file_name,

@@ -171,6 +171,8 @@ struct mlx5_eswitch_fdb {
 			struct mlx5_flow_group *allmulti_grp;
 			struct mlx5_flow_group *promisc_grp;
 			struct mlx5_flow_table *vepa_fdb;
+			struct mlx5_flow_table *ipsec_fdb;
+			struct mlx5_pkt_reformat *pkt_reformat;
 			struct mlx5_flow_handle *vepa_uplink_rule;
 			struct mlx5_flow_handle *vepa_star_rule;
 		} legacy;

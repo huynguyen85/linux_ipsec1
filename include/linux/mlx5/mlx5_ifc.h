@@ -588,9 +588,13 @@ struct mlx5_ifc_fte_match_set_misc2_bits {
 
 	u8         metadata_reg_a[0x20];
 
-	u8         metadata_reg_b[0x20];
+	u8         metadata_reg_b[0x20];//is IPSec under regb ?
 
-	u8         reserved_at_1c0[0x40];
+	u8	ipsec_next_header[0x8];
+	u8	ipsec_syndrome[0x8];
+	u8	reserved[0x10];
+
+	u8         reserved_at_1e0[0x20];
 };
 
 struct mlx5_ifc_fte_match_set_misc3_bits {
@@ -5570,8 +5574,7 @@ struct mlx5_ifc_query_eq_in_bits {
 };
 
 struct mlx5_ifc_packet_reformat_context_in_bits {
-	u8         reserved_at_0[0x5];
-	u8         reformat_type[0x3];
+	u8         reformat_type[0x8];
 	u8         reserved_at_8[0xe];
 	u8         reformat_data_size[0xa];
 

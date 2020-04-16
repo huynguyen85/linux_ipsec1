@@ -377,7 +377,6 @@ out:
 int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv,
 			struct mlx5e_ipsec_sa_entry *sa_entry)
 {
-	u8 action[MLX5_UN_SZ_BYTES(set_add_copy_action_in_auto)] = {};
 	struct mlx5_accel_esp_xfrm_attrs *attrs = &sa_entry->xfrm->attrs;
 	struct mlx5_ipsec_sa_ctx *sa_ctx = sa_entry->hw_context;
 	struct mlx5_modify_hdr *modify_hdr = NULL;
@@ -392,6 +391,8 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv,
 	u16 ethertype;
 	u8 ip_version;
 	int err = 0;
+
+	struct mlx5_eswitch *esw = mdev->priv.eswitch;
 	printk("mlx5e_xfrm_add_rule enter\n");
 
 	if(!mlx5_is_ipsec_device(mdev))
@@ -425,33 +426,6 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv,
 		goto out;
 	}
 
-	/* Set 1  bit ipsec marker */
-	/* Set 24 bit ipsec_obj_id */
-	sa_ctx->set_modify_hdr = NULL;
-	if (attrs->action == MLX5_ACCEL_ESP_ACTION_DECRYPT) {
-		MLX5_SET(set_action_in,
-			 action,
-			 action_type,
-			 MLX5_ACTION_TYPE_SET);
-		MLX5_SET(set_action_in, action,
-			 field,
-			 MLX5_ACTION_IN_FIELD_METADATA_REG_B);
-		MLX5_SET(set_action_in, action, data, (sa_ctx->ipsec_obj_id << 1) | 0x1);
-		MLX5_SET(set_action_in, action, offset, 7);
-		MLX5_SET(set_action_in, action, length, 25);
-
-		modify_hdr = mlx5_modify_header_alloc(mdev,
-						      MLX5_FLOW_NAMESPACE_KERNEL,
-						      1,
-						      action);
-
-		if (IS_ERR(modify_hdr)) {
-			mlx5_core_err(mdev, "fail to alloc ipsec set modify_header_id\n");
-			err = PTR_ERR(modify_hdr);
-			goto out;
-		}
-	}
-
 	/* remove misc params, no match on spi as it is HW generated */
 	//spec->match_criteria_enable = MLX5_MATCH_OUTER_HEADERS | MLX5_MATCH_MISC_PARAMETERS;
 	// #ft match criteria value, action: encrypt , pkt reforamt;  dst: uplink vport (0xffff)
@@ -476,7 +450,7 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv,
 		 IPPROTO_ESP);
 	*/
 
-	/* SPI number  - to remove  but this will be used as th header for packet reformat data
+	/* SPI number  - to remove  but this will be used as the header for packet reformat data
 	MLX5_SET_TO_ONES(fte_match_param, spec->match_criteria,
 			 misc_parameters.outer_esp_spi);
 	MLX5_SET(fte_match_param, spec->match_value, misc_parameters.outer_esp_spi,
@@ -523,27 +497,22 @@ int mlx5e_xfrm_add_rule(struct mlx5e_priv *priv,
 	if (attrs->action == MLX5_ACCEL_ESP_ACTION_DECRYPT) {
 		flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST |
 				  MLX5_FLOW_CONTEXT_ACTION_IPSEC_DECRYPT |
-				  MLX5_FLOW_CONTEXT_ACTION_MOD_HDR;
-		dest.type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
-		flow_act.modify_hdr = modify_hdr;
-		if (ip_version == 4) {
-			fs_t = &priv->fs.accel.accel_tables[ACCEL_FS_IPV4_ESP];
-			dest.ft = priv->fs.accel.ipsec_default[IPV4_ESP].ft_rx_err.t;
-		} else {
-			fs_t = &priv->fs.accel.accel_tables[ACCEL_FS_IPV6_ESP];
-			dest.ft = priv->fs.accel.ipsec_default[IPV6_ESP].ft_rx_err.t;
-		}
+				  MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT;
 
-
-		/* Fail safe check if ESP FTs are not initialized */
-		if (!fs_t || !dest.ft)
+		flow_act.pkt_reformat = mlx5_packet_reformat_alloc(mdev, MLX5_REFORMAT_TYPE_DEL_ESP_TRANSPORT, 0, NULL, MLX5_FLOW_NAMESPACE_FDB);
+		if (IS_ERR(flow_act.pkt_reformat)) {
+			printk("%s:%d - mlx5_packet_reformat_alloc failed .\n",__func__ , __LINE__);
+			err = PTR_ERR(flow_act.pkt_reformat);
 			goto out_modify_header;
-
-		rule_tmp = mlx5_add_flow_rules(fs_t->t, spec, &flow_act, &dest, 1);
+		}
+		memset(&dest, 0, sizeof(dest));
+		pkt_reformat = flow_act.pkt_reformat;
+		dest.type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
+		dest.vport.num = 0;
+		rule_tmp = mlx5_add_flow_rules(esw->fdb_table.legacy.ipsec_fdb, spec, &flow_act, &dest, 1);
 	} else {
 		char * reformatbf = kzalloc(16, GFP_KERNEL);
 		struct mlx5_flow_destination dest = {};
-		struct mlx5_eswitch *esw = mdev->priv.eswitch;
 		/* Add IPsec indicator in metdata_reg_a - non need the driver gets plain text to remove
 		spec->match_criteria_enable |= MLX5_MATCH_MISC_PARAMETERS_2;
 		MLX5_SET(fte_match_param,
@@ -599,8 +568,6 @@ out_pkt_rfrmt:
 	if (flow_act.pkt_reformat)
 		mlx5_packet_reformat_dealloc(mdev, flow_act.pkt_reformat);
 out_modify_header:
-	if (attrs->action == MLX5_ACCEL_ESP_ACTION_DECRYPT)
-		mlx5_modify_header_dealloc(mdev, modify_hdr);
 out:
 	kvfree(spec);
 	return err;

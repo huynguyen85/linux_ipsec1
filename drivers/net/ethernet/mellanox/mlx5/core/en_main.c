@@ -67,6 +67,8 @@
 #include "lib/mlx5.h"
 #include "en_accel/ipsec_steering.h"
 
+#define DEBUG_FL(format,...) if(1) {printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__);}
+
 bool mlx5e_check_fragmented_striding_rq_cap(struct mlx5_core_dev *mdev)
 {
 	bool striding_rq_umr = MLX5_CAP_GEN(mdev, striding_rq) &&
@@ -4978,7 +4980,9 @@ static void mlx5e_build_nic_netdev(struct net_device *netdev)
 	netdev->priv_flags       |= IFF_UNICAST_FLT;
 
 	mlx5e_set_netdev_dev_addr(netdev);
+DEBUG_FL("Call mlx5e_ipsec_build_netdev for %s",netdev_name(netdev));
 	mlx5e_ipsec_build_netdev(priv);
+DEBUG_FL("Post call mlx5e_ipsec_build_netdev for %s",netdev_name(netdev));
 	mlx5e_tls_build_netdev(priv);
 }
 
@@ -5304,7 +5308,6 @@ void mlx5e_netdev_cleanup(struct net_device *netdev, struct mlx5e_priv *priv)
 	free_cpumask_var(priv->scratchpad.cpumask);
 }
 
-#define DEBUG_FL(format,...) if(0) {printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__);}
 struct net_device *mlx5e_create_netdev(struct mlx5_core_dev *mdev,
 				       const struct mlx5e_profile *profile,
 				       int nch,

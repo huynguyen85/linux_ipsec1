@@ -1183,7 +1183,7 @@ static int esw_create_offloads_fdb_tables(struct mlx5_eswitch *esw, int nvports)
 	int table_size, ix, err = 0;
 	struct mlx5_flow_group *g;
 	void *match_criteria;
-	void *outer_headers_c;
+	//void *outer_headers_c;
 	u8 *dmac;
 
 	DEBUG_FL("Create offloads FDB Tables\n");
@@ -1354,7 +1354,7 @@ peer_miss_err:
 	mlx5_destroy_flow_group(esw->fdb_table.offloads.send_to_vport_grp);
 send_vport_err:
 	mlx5_esw_chains_destroy(esw);
-fdb_chains_err:
+//fdb_chains_err:
 	mlx5_destroy_flow_table(esw->fdb_table.offloads.slow_fdb);
 slow_fdb_err:
 	/* Holds true only as long as DMFS is the default */

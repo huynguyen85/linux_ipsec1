@@ -54,6 +54,7 @@
 #define XFRM_INC_STATS(net, field)	((void)(net))
 #endif
 
+#define DEBUG_XFRM_FL(format,...) if(1) { printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__); }
 
 /* Organization of SPD aka "XFRM rules"
    ------------------------------------

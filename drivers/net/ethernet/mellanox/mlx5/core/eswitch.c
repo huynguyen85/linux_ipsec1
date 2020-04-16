@@ -273,8 +273,92 @@ esw_fdb_set_vport_promisc_rule(struct mlx5_eswitch *esw, u16 vport)
 
 enum {
 	LEGACY_VEPA_PRIO = 0,
+	LEGACY_IPSEC_PRIO,
 	LEGACY_FDB_PRIO,
 };
+
+/*
+ *
+ ft2: (could create at init and save it)
+match on IPsec syndrome / ASO syndrome
+action: on oki and oki , packet reformat ro decap
+dest: is vport 0*
+
+RX FTE
+	LEGACY FDB
+		create RX IPsec rule on src/dst IP
+		action decrypt
+		dest ipsec_fdb
+	LEGACY_IPSEC_PRIO
+		create Ipsec rule on IPsec syndrome
+		action decap (1st FG)
+		dest vport 0
+
+		default drop rule (2nd FG)
+			NO MATCH and drop
+ *
+ */
+static int esw_create_legacy_ipsec_table(struct mlx5_eswitch *esw) {
+	struct mlx5_flow_handle *rule_tmp = NULL;
+	struct mlx5_flow_table_attr ft_attr = {};
+	struct mlx5_flow_destination dest = {};
+	struct mlx5_core_dev *dev = esw->dev;
+	struct mlx5_flow_act flow_act = {0};
+	struct mlx5_flow_namespace *root_ns;
+	struct mlx5_flow_spec *spec = NULL;
+	struct mlx5_flow_table *fdb;
+	int err;
+
+
+	root_ns = mlx5_get_fdb_sub_ns(dev, 0);
+	if (!root_ns) {
+		esw_warn(dev, "Failed to get FDB flow namespace\n");
+		return -EOPNOTSUPP;
+	}
+
+	ft_attr.prio = LEGACY_IPSEC_PRIO;
+	ft_attr.max_fte = 1;
+	ft_attr.autogroup.max_num_groups = 1;
+	ft_attr.flags = MLX5_FLOW_TABLE_TUNNEL_EN_REFORMAT | MLX5_FLOW_TABLE_TUNNEL_EN_DECAP;
+	fdb = mlx5_create_auto_grouped_flow_table(root_ns, &ft_attr);
+	if (IS_ERR(fdb)) {
+		err = PTR_ERR(fdb);
+		esw_warn(dev, "Failed to create IPSec FDB err %d\n", err);
+		return err;
+	}
+
+	/* create match criteria on syndromes and fte on zero */
+	spec = kvzalloc(sizeof(*spec), GFP_KERNEL);
+	if (!spec) {
+		err = -ENOMEM;
+		return err;
+	}
+
+
+	/* add ipsec_syndrome rule 
+	spec->match_criteria_enable = MLX5_MATCH_MISC_PARAMETERS_2;
+	MLX5_SET_TO_ONES(fte_match_param, spec->match_criteria, misc_parameters_2.ipsec_syndrome);
+	MLX5_SET(fte_match_param, spec->match_value, misc_parameters_2.ipsec_syndrome, 0);
+
+	flow_act.pkt_reformat = mlx5_packet_reformat_alloc(dev, MLX5_REFORMAT_TYPE_DEL_ESP_TRANSPORT, 0, NULL, MLX5_FLOW_NAMESPACE_FDB);
+	//flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST | MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT | MLX5_FLOW_CONTEXT_ACTION_ALLOW;
+	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT | MLX5_FLOW_CONTEXT_ACTION_FWD_DEST;
+	memset(&dest, 0, sizeof(dest));
+	dest.type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
+	dest.vport.num = 0;
+
+	//rule_tmp = mlx5_add_flow_rules( fdb, spec, &flow_act, NULL, 0);
+	rule_tmp = mlx5_add_flow_rules( fdb, spec, &flow_act, &dest, 1);
+	kvfree(spec);
+	if (IS_ERR(rule_tmp)) {
+		mlx5_packet_reformat_dealloc(dev, flow_act.pkt_reformat);
+		return PTR_ERR(rule_tmp);
+	}
+*/
+	esw->fdb_table.legacy.ipsec_fdb = fdb;
+	esw->fdb_table.legacy.pkt_reformat = flow_act.pkt_reformat;
+	return 0;
+}
 
 static int esw_create_legacy_vepa_table(struct mlx5_eswitch *esw)
 {
@@ -425,6 +509,21 @@ out:
 	return err;
 }
 
+static void esw_destroy_legacy_ipsec_table(struct mlx5_eswitch *esw)
+{
+	esw_debug(esw->dev, "Destroy IPSec Table\n");
+	if (!esw->fdb_table.legacy.ipsec_fdb)
+		return;
+
+	mlx5_destroy_flow_table(esw->fdb_table.legacy.ipsec_fdb);
+
+	if (esw->fdb_table.legacy.pkt_reformat)
+		mlx5_packet_reformat_dealloc(esw->dev, esw->fdb_table.legacy.pkt_reformat);
+
+	esw->fdb_table.legacy.pkt_reformat = NULL;
+	esw->fdb_table.legacy.ipsec_fdb = NULL;
+}
+
 static void esw_destroy_legacy_vepa_table(struct mlx5_eswitch *esw)
 {
 	esw_debug(esw->dev, "Destroy VEPA Table\n");
@@ -447,8 +546,10 @@ static void esw_destroy_legacy_fdb_table(struct mlx5_eswitch *esw)
 		mlx5_destroy_flow_group(esw->fdb_table.legacy.allmulti_grp);
 	if (esw->fdb_table.legacy.addr_grp)
 		mlx5_destroy_flow_group(esw->fdb_table.legacy.addr_grp);
+
 	if (esw->fdb_table.legacy.ipsec_grp)
 		mlx5_destroy_flow_group(esw->fdb_table.legacy.ipsec_grp);
+
 	mlx5_destroy_flow_table(esw->fdb_table.legacy.fdb);
 
 	esw->fdb_table.legacy.fdb = NULL;
@@ -471,12 +572,21 @@ static int esw_create_legacy_table(struct mlx5_eswitch *esw)
 	if (err)
 		esw_destroy_legacy_vepa_table(esw);
 
+	printk("esw_create_legacy_table 001\n");
+	err = esw_create_legacy_ipsec_table(esw);
+	if (err) {
+		printk("esw_create_legacy_table 002\n");
+		esw_destroy_legacy_fdb_table(esw);
+		esw_destroy_legacy_vepa_table(esw);
+		return err;
+	}
 	return err;
 }
 
 static void esw_destroy_legacy_table(struct mlx5_eswitch *esw)
 {
 	esw_cleanup_vepa_rules(esw);
+	esw_destroy_legacy_ipsec_table(esw);
 	esw_destroy_legacy_fdb_table(esw);
 	esw_destroy_legacy_vepa_table(esw);
 }
@@ -2119,7 +2229,9 @@ int mlx5_eswitch_enable(struct mlx5_eswitch *esw, int mode)
 	mlx5_lag_update(esw->dev);
 
 	if (mode == MLX5_ESWITCH_LEGACY) {
+		DEBUG_FL("call esw_legacy_enable");
 		err = esw_legacy_enable(esw);
+		DEBUG_FL("call esw_legacy_enable - err = %d", err);
 	} else {
 		mlx5_reload_interface(esw->dev, MLX5_INTERFACE_PROTOCOL_ETH);
 		mlx5_reload_interface(esw->dev, MLX5_INTERFACE_PROTOCOL_IB);

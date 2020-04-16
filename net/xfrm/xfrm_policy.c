@@ -3525,6 +3525,7 @@ static int check_offload_state_ok(struct net *net, const struct xfrm_tmpl *tmpl,
 				continue;
 
 			if (xfrm_state_ok(tmpl, x, family)) {
+				DEBUG_XFRM_FL("found with XFRM_OFFLOAD_FULL and xfrm_state_ok");
 				found = 1;
 				goto out;
 			}

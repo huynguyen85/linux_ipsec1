@@ -42,7 +42,7 @@
 #include "en_accel/ipsec_rxtx.h"
 #include "en_accel/ipsec_steering.h"
 
-#define DEBUG_FL(format,...) printk("%s:%d - "format,__func__,__LINE__,##__VA_ARGS__)
+#define DEBUG_FL(format,...) printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__)
 static struct mlx5e_ipsec_sa_entry *to_ipsec_sa_entry(struct xfrm_state *x)
 {
 	struct mlx5e_ipsec_sa_entry *sa;
@@ -299,6 +299,7 @@ static int mlx5e_xfrm_add_state(struct xfrm_state *x)
 	unsigned int sa_handle;
 	int err;
 
+	DEBUG_FL("Enter\n");
 	priv = netdev_priv(netdev);
 
 	err = mlx5e_xfrm_validate_state(x);
@@ -358,6 +359,7 @@ static int mlx5e_xfrm_add_state(struct xfrm_state *x)
 	}
 
 	x->xso.offload_handle = (unsigned long)sa_entry;
+	DEBUG_FL("Out Success\n");
 	goto out;
 
 err_add_rule:
@@ -520,15 +522,17 @@ void mlx5e_ipsec_build_netdev(struct mlx5e_priv *priv)
 	struct mlx5_core_dev *mdev = priv->mdev;
 	struct net_device *netdev = priv->netdev;
 
+	DEBUG_FL("Enter");
 	if (!priv->ipsec)
 		return;
 
 	if (!(mlx5_accel_ipsec_device_caps(mdev) & MLX5_ACCEL_IPSEC_CAP_ESP) ||
 	    !MLX5_CAP_ETH(mdev, swp)) {
-		mlx5_core_dbg(mdev, "mlx5e: ESP and SWP offload not supported\n");
+		mlx5_core_info(mdev, "mlx5e: ESP and SWP offload not supported\n");
 		return;
 	}
 
+	DEBUG_FL("Init ops");
 	mlx5_core_info(mdev, "mlx5e: IPSec ESP acceleration enabled for device %s\n", netdev_name(netdev));
 	netdev->xfrmdev_ops = &mlx5e_ipsec_xfrmdev_ops;
 	netdev->features |= NETIF_F_HW_ESP;

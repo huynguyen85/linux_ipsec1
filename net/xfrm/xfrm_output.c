@@ -18,6 +18,7 @@
 
 #include "xfrm_inout.h"
 
+
 static int xfrm_output2(struct net *net, struct sock *sk, struct sk_buff *skb);
 static int xfrm_inner_extract_output(struct xfrm_state *x, struct sk_buff *skb);
 
@@ -565,22 +566,29 @@ int xfrm_output(struct sock *sk, struct sk_buff *skb)
 	struct xfrm_state *x = skb_dst(skb)->xfrm;
 	int err;
 
-	struct dst_entry *dst = skb_dst_pop(skb);
-	if (!dst) {
-		return -EHOSTUNREACH;
-	}
-	skb_dst_set(skb, dst);
+	if ((x->xso.flags & XFRM_OFFLOAD_FULL)) {
+		struct dst_entry *dst = skb_dst_pop(skb);
 
-	err = skb_dst(skb)->ops->local_out(net, skb->sk, skb);
-	if (unlikely(err != 1)) {
-		return err;
-	}
+		DEBUG_XFRM_FL("enter - XFRM_OFFLOAD_FULL");
+		if (!dst) {
+			return -EHOSTUNREACH;
+		}
+		skb_dst_set(skb, dst);
 
-	if (!skb_dst(skb)->xfrm) {
-		return dst_output(net, skb->sk, skb);
-	}
+		err = skb_dst(skb)->ops->local_out(net, skb->sk, skb);
+		if (unlikely(err != 1)) {
+		DEBUG_XFRM_FL("out - err = %d",err);
+			return err;
+		}
 
-	return 0;
+		if (!skb_dst(skb)->xfrm) {
+		DEBUG_XFRM_FL("out - dst_output");
+			return dst_output(net, skb->sk, skb);
+		}
+
+		DEBUG_XFRM_FL("out - XFRM_OFFLOAD_FULL");
+		return 0;
+	}
 
 	secpath_reset(skb);
 

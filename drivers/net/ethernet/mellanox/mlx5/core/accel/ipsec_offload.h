@@ -40,9 +40,10 @@ static inline bool mlx5_is_ipsec_device(struct mlx5_core_dev *mdev)
 	if (!MLX5_CAP_GEN(mdev, ipsec_offload))
 		return false;
 
+/*
 	if (!MLX5_CAP_GEN(mdev, log_max_dek))
 		return false;
-
+*/
 	if (!(MLX5_CAP_GEN_64(mdev, general_obj_types) &
 	    MLX5_HCA_CAP_GENERAL_OBJECT_TYPES_IPSEC))
 		return false;

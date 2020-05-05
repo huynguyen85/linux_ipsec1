@@ -823,11 +823,6 @@ static inline u16 fw_rev_sub(struct mlx5_core_dev *dev)
 	return ioread32be(&dev->iseg->cmdif_rev_fw_sub) & 0xffff;
 }
 
-static inline u16 cmdif_rev(struct mlx5_core_dev *dev)
-{
-	return ioread32be(&dev->iseg->cmdif_rev_fw_sub) >> 16;
-}
-
 static inline u32 mlx5_base_mkey(const u32 key)
 {
 	return key & 0xffffff00u;
@@ -1012,11 +1007,6 @@ int mlx5_core_roce_gid_set(struct mlx5_core_dev *dev, unsigned int index,
 			   u8 roce_version, u8 roce_l3_type, const u8 *gid,
 			   const u8 *mac, bool vlan, u16 vlan_id, u8 port_num);
 
-static inline int fw_initializing(struct mlx5_core_dev *dev)
-{
-	return ioread32be(&dev->iseg->initializing) >> 31;
-}
-
 static inline u32 mlx5_mkey_to_idx(u32 mkey)
 {
 	return mkey >> 8;
@@ -1074,6 +1064,8 @@ bool mlx5_lag_is_sriov(struct mlx5_core_dev *dev);
 bool mlx5_lag_is_multipath(struct mlx5_core_dev *dev);
 bool mlx5_lag_is_active(struct mlx5_core_dev *dev);
 struct net_device *mlx5_lag_get_roce_netdev(struct mlx5_core_dev *dev);
+u8 mlx5_lag_get_slave_port(struct mlx5_core_dev *dev,
+			   struct net_device *slave);
 int mlx5_lag_query_cong_counters(struct mlx5_core_dev *dev,
 				 u64 *values,
 				 int num_counters,

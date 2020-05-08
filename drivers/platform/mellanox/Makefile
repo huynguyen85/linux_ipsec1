@@ -5,7 +5,10 @@
 #
 obj-$(CONFIG_MLXBF_BOOTCTL)	+= mlx-bootctl.o
 obj-$(CONFIG_MLXBF_TRIO)	+= mlx-trio.o
+obj-$(CONFIG_MLXBF_PKA)		+= pka_drv_mlxbf.o
 obj-$(CONFIG_MLXBF_TMFIFO)	+= mlxbf-tmfifo.o
 obj-$(CONFIG_MLXBF_LIVEFISH)	+= mlxbf-livefish.o
 obj-$(CONFIG_MLXREG_HOTPLUG)	+= mlxreg-hotplug.o
 obj-$(CONFIG_MLXREG_IO) += mlxreg-io.o
+
+pka-mlxbf-y := pka_drv_mlxbf.o pka_dev.o

@@ -61,6 +61,13 @@ config MLXBF_PKA
           This driver can also be built as a module.  If so, the module will
           be called pka-mlxbf.
 
+config MLXBF_PMC
+       tristate "Mellanox BlueField performance counter driver"
+       depends on ARM64 && HWMON
+       help
+         This driver supports the performance counters of Mellanox
+         Bluefield SoC.
+
 config MLXBF_BOOTCTL
 	tristate "Mellanox BlueField Firmware Boot Control driver"
 	depends on ARM64

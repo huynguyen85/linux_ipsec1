@@ -116,7 +116,7 @@ struct its_node {
 	int			vlpi_redist_offset;
 };
 
-#define ITS_ITT_ALIGN		SZ_256
+#define ITS_ITT_ALIGN		SZ_4K
 
 /* The maximum number of VPEID bits supported by VLPI commands */
 #define ITS_MAX_VPEID_BITS	(16)

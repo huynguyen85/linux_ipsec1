@@ -1396,12 +1396,16 @@ int mlx5e_open_icosq(struct mlx5e_channel *c, struct mlx5e_params *params,
 	if (err)
 		return err;
 
+	printk("sq->cq.mcq.cqn=0x%x\n", sq->cq.mcq.cqn);
+
 	csp.cqn             = sq->cq.mcq.cqn;
 	csp.wq_ctrl         = &sq->wq_ctrl;
 	csp.min_inline_mode = params->tx_min_inline_mode;
 	err = mlx5e_create_sq_rdy(c->mdev, param, &csp, &sq->sqn);
 	if (err)
 		goto err_free_icosq;
+
+	printk("mlx5e_open_icosq sqn=0x%x\n", sq->sqn);
 
 	return 0;
 

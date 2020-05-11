@@ -892,6 +892,8 @@ struct mlx5e_priv {
 	struct mlx5e_hv_vhca_stats_agent stats_agent;
 #endif
 	struct mlx5e_scratchpad    scratchpad;
+
+	//struct mlx5e_aso aso;
 };
 
 struct mlx5e_profile {

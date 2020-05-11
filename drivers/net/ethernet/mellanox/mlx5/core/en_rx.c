@@ -50,6 +50,7 @@
 #include "en/xdp.h"
 #include "en/xsk/rx.h"
 #include "en/health.h"
+#include "en/aso.h"
 
 static inline bool mlx5e_rx_hw_stamp(struct hwtstamp_config *config)
 {
@@ -639,6 +640,9 @@ void mlx5e_poll_ico_cq(struct mlx5e_cq *cq)
 				wi->umr.rq->mpwqe.umr_completed++;
 			} else if (likely(wi->opcode == MLX5_OPCODE_NOP)) {
 				sqcc++;
+			} else if (likely(wi->opcode == MLX5_OPCODE_NOP)) {
+				sqcc += MLX5E_ASO_WQEBBS;
+				printk("Huy ASO completion\n");
 			} else {
 				netdev_WARN_ONCE(cq->channel->netdev,
 						 "Bad OPCODE in ICOSQ WQE info: 0x%x\n",

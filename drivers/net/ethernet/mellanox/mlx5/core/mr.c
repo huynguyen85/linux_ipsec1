@@ -58,7 +58,7 @@ int mlx5_core_create_mkey(struct mlx5_core_dev *dev,
 	mkey->key |= mlx5_idx_to_mkey(mkey_index);
 	mkey->pd = MLX5_GET(mkc, mkc, pd);
 
-	mlx5_core_dbg(dev, "out 0x%x, mkey 0x%x\n", mkey_index, mkey->key);
+	mlx5_core_err(dev, "out 0x%x, mkey 0x%x\n", mkey_index, mkey->key);
 	return 0;
 }
 EXPORT_SYMBOL(mlx5_core_create_mkey);

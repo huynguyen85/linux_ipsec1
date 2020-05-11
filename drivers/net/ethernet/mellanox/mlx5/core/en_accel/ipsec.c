@@ -41,6 +41,7 @@
 #include "en_accel/ipsec.h"
 #include "en_accel/ipsec_rxtx.h"
 #include "en_accel/ipsec_steering.h"
+#include "en/aso.h"
 
 #define DEBUG_FL(format,...) printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__)
 static struct mlx5e_ipsec_sa_entry *to_ipsec_sa_entry(struct xfrm_state *x)
@@ -407,6 +408,7 @@ static void mlx5e_xfrm_free_state(struct xfrm_state *x)
 int mlx5e_ipsec_init(struct mlx5e_priv *priv)
 {
 	struct mlx5e_ipsec *ipsec = NULL;
+	int err;
 
 	if (!MLX5_IPSEC_DEV(priv->mdev)) {
 		netdev_dbg(priv->netdev, "Not an IPSec offload device\n");
@@ -424,14 +426,27 @@ int mlx5e_ipsec_init(struct mlx5e_priv *priv)
 	ipsec->en_priv->ipsec = ipsec;
 	ipsec->no_trailer = !!(mlx5_accel_ipsec_device_caps(priv->mdev) &
 			       MLX5_ACCEL_IPSEC_CAP_RX_NO_TRAILER);
+
+	err = mlx5e_aso_reg_mr(priv);
+	if (err)
+		goto out;
+
 	ipsec->wq = alloc_ordered_workqueue("mlx5e_ipsec: %s", 0,
 					    priv->netdev->name);
 	if (!ipsec->wq) {
-		kfree(ipsec);
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto out_mr;
 	}
+
 	DEBUG_FL("IPSec attached to netdevice\n");
 	return 0;
+
+out_mr:
+	mlx5e_aso_dereg_mr(priv);
+
+out:
+	kfree(ipsec);
+	return err;
 }
 
 void mlx5e_ipsec_cleanup(struct mlx5e_priv *priv)
@@ -442,6 +457,7 @@ void mlx5e_ipsec_cleanup(struct mlx5e_priv *priv)
 		return;
 
 	destroy_workqueue(ipsec->wq);
+	mlx5e_aso_dereg_mr(priv);
 
 	ida_destroy(&ipsec->halloc);
 	kfree(ipsec);

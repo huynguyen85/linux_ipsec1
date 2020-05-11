@@ -2246,6 +2246,10 @@ void mlx5e_build_icosq_param(struct mlx5e_priv *priv,
 	mlx5e_build_sq_param_common(priv, param);
 
 	MLX5_SET(wq, wq, log_wq_sz, log_wq_size);
+
+//	if (MLX5_CAP_ETH(priv->mdev, reg_umr_sq))
+//		printk("skip reg_umr\n");
+
 	MLX5_SET(sqc, sqc, reg_umr, MLX5_CAP_ETH(priv->mdev, reg_umr_sq));
 }
 
@@ -5036,8 +5040,10 @@ static int mlx5e_nic_init(struct mlx5_core_dev *mdev,
 	mlx5e_timestamp_init(priv);
 
 	err = mlx5e_ipsec_init(priv);
-	if (err)
+	if (err) {
 		mlx5_core_err(mdev, "IPSec initialization failed, %d\n", err);
+		return err;
+	}
 	err = mlx5e_tls_init(priv);
 	if (err)
 		mlx5_core_err(mdev, "TLS initialization failed, %d\n", err);

@@ -75,6 +75,14 @@ struct mlx5e_ipsec_stats {
 	u64 ipsec_cmd_drop;
 };
 
+struct mlx5e_ipsec_aso {
+	struct mlx5_core_mkey mkey;
+	dma_addr_t dma_addr;
+	u32 ctx[MLX5_ST_SZ_DW(ipsec_aso)];
+	size_t size;
+	u32 pdn;
+};
+
 struct mlx5e_ipsec {
 	struct mlx5e_priv *en_priv;
 	DECLARE_HASHTABLE(sadb_rx, MLX5E_IPSEC_SADB_RX_BITS);
@@ -86,6 +94,9 @@ struct mlx5e_ipsec {
 	struct workqueue_struct *wq;
 	struct mlx5_flow_table *ft_tx;
 	struct mlx5_flow_table *fast_fdb;
+
+	/* Full offload */ /* Huy To do SRIOV mode only */
+	struct mlx5e_ipsec_aso aso;
 };
 
 struct mlx5e_ipsec_esn_state {

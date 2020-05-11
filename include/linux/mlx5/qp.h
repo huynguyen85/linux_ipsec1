@@ -212,6 +212,26 @@ struct mlx5_wqe_ctrl_seg {
 	};
 };
 
+struct mlx5_wqe_aso_ctrl_seg {
+	__be32	va_h;
+	__be32	va_l; /* include read_enable */
+	__be32	l_key;
+	u8	data_mask_mode;
+	u8	condition_1_0_operand;
+	u8	condition_1_0_offset;
+	u8	data_offset_condition_operand;
+	__be32	condition_0_data;
+	__be32	condition_0_mask;
+	__be32	condition_1_data;
+	__be32	condition_1_mask;
+	__be64	bitwise_data;
+	__be64	data_mask;
+};
+
+struct mlx5_wqe_aso_data_seg {
+	__be32	bytewise_data[16];
+};
+
 #define MLX5_WQE_CTRL_DS_MASK 0x3f
 #define MLX5_WQE_CTRL_QPN_MASK 0xffffff00
 #define MLX5_WQE_CTRL_QPN_SHIFT 8
@@ -219,7 +239,7 @@ struct mlx5_wqe_ctrl_seg {
 #define MLX5_WQE_CTRL_OPCODE_MASK 0xff
 #define MLX5_WQE_CTRL_WQE_INDEX_MASK 0x00ffff00
 #define MLX5_WQE_CTRL_WQE_INDEX_SHIFT 8
-
+#define MLX5_WQE_CTRL_WQE_OPC_MOD_SHIFT 24
 enum {
 	MLX5_ETH_WQE_L3_INNER_CSUM      = 1 << 4,
 	MLX5_ETH_WQE_L4_INNER_CSUM      = 1 << 5,

@@ -98,6 +98,7 @@ int mlx5e_create_mdev_resources(struct mlx5_core_dev *mdev)
 		mlx5_core_err(mdev, "alloc pd failed, %d\n", err);
 		return err;
 	}
+	printk("res->pdn=0x%x\n", res->pdn);
 
 	err = mlx5_core_alloc_transport_domain(mdev, &res->td.tdn);
 	if (err) {

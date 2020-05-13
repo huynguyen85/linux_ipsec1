@@ -268,6 +268,7 @@ static int mlx5e_create_umr_mkey(struct mlx5_core_dev *mdev,
 	u32 *in;
 	int err;
 
+	printk("mlx5e_create_umr_mkey\n");
 	in = kvzalloc(inlen, GFP_KERNEL);
 	if (!in)
 		return -ENOMEM;

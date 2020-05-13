@@ -640,7 +640,7 @@ void mlx5e_poll_ico_cq(struct mlx5e_cq *cq)
 				wi->umr.rq->mpwqe.umr_completed++;
 			} else if (likely(wi->opcode == MLX5_OPCODE_NOP)) {
 				sqcc++;
-			} else if (likely(wi->opcode == MLX5_OPCODE_NOP)) {
+			} else if (likely(wi->opcode == MLX5_OPCODE_ACCESS_ASO)) {
 				sqcc += MLX5E_ASO_WQEBBS;
 				printk("Huy ASO completion\n");
 			} else {

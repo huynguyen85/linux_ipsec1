@@ -339,6 +339,8 @@ static int mlx5e_xfrm_add_state(struct xfrm_state *x)
 		goto err_xfrm;
 	}
 
+	mlx5e_aso_query_ipsec_aso(priv, sa_handle);
+
 	err = mlx5e_xfrm_add_rule(priv, sa_entry);
 	if (err)
 		goto err_hw_ctx;

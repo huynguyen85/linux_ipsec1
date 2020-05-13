@@ -78,7 +78,7 @@ void mlx5e_aso_dereg_mr(struct mlx5e_priv *priv)
 	mlx5_core_dealloc_pd(priv->mdev, aso->pdn);
 }
 
-static inline void mlx5e_build_aso_wqe(struct mlx5e_priv *priv,
+static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 				       struct mlx5e_icosq *sq,
 				       struct mlx5e_aso_wqe *wqe,
 				       u32 ipsec_obj_id)
@@ -101,14 +101,40 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_priv *priv,
 	aso_ctrl->l_key = cpu_to_be32(aso->mkey.key);
 }
 
-/*
-+int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
-+{
-+	struct mlx5e_ipsec_aso *aso = &priv->ipsec->aso;
-+	struct mlx5e_icosq *sq = &priv->channels[0]->icosq;
-+
-+}
-+*/
+
+int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
+{
+	struct mlx5e_ipsec_aso *aso = &priv->ipsec->aso;
+	struct mlx5e_icosq *sq = &priv->channels.c[0]->icosq;
+	struct mlx5_wq_cyc *wq = &sq->wq;
+	struct mlx5e_aso_wqe *aso_wqe;
+	u16 pi, contig_wqebbs_room;
+
+	pi = mlx5_wq_cyc_ctr2ix(wq, sq->pc);
+	contig_wqebbs_room = mlx5_wq_cyc_get_contig_wqebbs(wq, pi);
+	
+	if (unlikely(contig_wqebbs_room < MLX5E_ASO_WQEBBS)) {
+		mlx5e_fill_icosq_frag_edge(sq, wq, pi, contig_wqebbs_room);
+		pi = mlx5_wq_cyc_ctr2ix(wq, sq->pc);
+	}
+
+	aso_wqe = mlx5_wq_cyc_get_wqe(wq, pi);
+	mlx5e_build_aso_wqe(aso, sq, aso_wqe, ipsec_obj_id);
+
+	sq->db.ico_wqe[pi].opcode = MLX5_OPCODE_ACCESS_ASO;
+	sq->pc += MLX5E_ASO_WQEBBS;
+	sq->doorbell_cseg = &aso_wqe->ctrl;
+
+	mlx5e_notify_hw(&sq->wq, sq->pc, sq->uar_map, sq->doorbell_cseg);
+	sq->doorbell_cseg = NULL;
+
+	msleep(1);
+
+	mlx5e_poll_ico_cq(&icosq->cq);
+
+	return 0;
+}
+
 
 /*
 void mlx5e_build_asosq_param(struct mlx5e_priv *priv,

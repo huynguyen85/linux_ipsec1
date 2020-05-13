@@ -2251,7 +2251,7 @@ void mlx5e_build_icosq_param(struct mlx5e_priv *priv,
 //	if (MLX5_CAP_ETH(priv->mdev, reg_umr_sq))
 //		printk("skip reg_umr\n");
 
-//	MLX5_SET(sqc, sqc, reg_umr, MLX5_CAP_ETH(priv->mdev, reg_umr_sq));
+	MLX5_SET(sqc, sqc, reg_umr, MLX5_CAP_ETH(priv->mdev, reg_umr_sq));
 }
 
 void mlx5e_build_xdpsq_param(struct mlx5e_priv *priv,

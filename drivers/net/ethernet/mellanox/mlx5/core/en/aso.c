@@ -35,13 +35,14 @@ int mlx5e_aso_reg_mr(struct mlx5e_priv *priv)
 	dma_addr_t dma_addr;
 	int err;
 
+/*
 	err = mlx5_core_alloc_pd(mdev, &aso->pdn);
 	if (err) {
 		mlx5_core_err(mdev, "alloc pd failed, %d\n", err);
 		return err;
 	}
 	mlx5_core_err(mdev, "aso->pdn=0x%x\n", aso->pdn);
-
+*/
 	dma_addr = dma_map_single(dma_device, aso->ctx, size, DMA_BIDIRECTIONAL);
 	err = dma_mapping_error(dma_device, dma_addr);
 	if (err) {
@@ -50,22 +51,24 @@ int mlx5e_aso_reg_mr(struct mlx5e_priv *priv)
 	}
 
 	/* Huy to do aso_pdn */
-	//err = mlx5e_aso_create_mkey(mdev, aso->pdn, &aso->mkey);
+/*
+	err = mlx5e_aso_create_mkey(mdev, aso->pdn, &aso->mkey);
 	if (err) {
 		mlx5_core_warn(mdev, "Can't create mkey\n");
 		goto out_mkey;
 	}
+*/
 	mlx5_core_err(mdev, "Huy dma_addr=0x%lx, aso->mkey.key=0x%x\n", dma_addr, aso->mkey.key);
 
 	aso->dma_addr = dma_addr;
 	aso->size = size;
 	return 0;
 
-out_mkey:
-	dma_unmap_single(dma_device, dma_addr, size, DMA_BIDIRECTIONAL);
+//out_mkey:
+//	dma_unmap_single(dma_device, dma_addr, size, DMA_BIDIRECTIONAL);
 
 out_dma:
-	mlx5_core_dealloc_pd(mdev, aso->pdn);
+//	mlx5_core_dealloc_pd(mdev, aso->pdn);
 	return err;	
 }
 
@@ -73,9 +76,9 @@ void mlx5e_aso_dereg_mr(struct mlx5e_priv *priv)
 {
 	struct mlx5e_ipsec_aso *aso = &priv->ipsec->aso;
 
-	//mlx5_core_destroy_mkey(priv->mdev, &aso->mkey);
+//	mlx5_core_destroy_mkey(priv->mdev, &aso->mkey);
 	dma_unmap_single(&priv->mdev->pdev->dev, aso->dma_addr, aso->size, DMA_BIDIRECTIONAL);
-	mlx5_core_dealloc_pd(priv->mdev, aso->pdn);
+//	mlx5_core_dealloc_pd(priv->mdev, aso->pdn);
 }
 
 static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
@@ -83,7 +86,6 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 				       struct mlx5e_aso_wqe *wqe,
 				       u32 ipsec_obj_id)
 {
-	struct mlx5e_ipsec_aso *aso = &priv->ipsec->aso;
 	struct mlx5_wqe_ctrl_seg *cseg = &wqe->ctrl;
 	struct mlx5_wqe_aso_ctrl_seg *aso_ctrl = &wqe->aso_ctrl;
 	u8 ds_cnt;
@@ -110,6 +112,8 @@ int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
 	struct mlx5e_aso_wqe *aso_wqe;
 	u16 pi, contig_wqebbs_room;
 
+	printk("mlx5e_aso_query_ipsec_aso\n");
+
 	pi = mlx5_wq_cyc_ctr2ix(wq, sq->pc);
 	contig_wqebbs_room = mlx5_wq_cyc_get_contig_wqebbs(wq, pi);
 	
@@ -130,7 +134,8 @@ int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
 
 	msleep(1);
 
-	mlx5e_poll_ico_cq(&icosq->cq);
+	printk("mlx5e_aso_query_ipsec_aso 002 \n");
+	mlx5e_poll_ico_cq(&sq->cq);
 
 	return 0;
 }

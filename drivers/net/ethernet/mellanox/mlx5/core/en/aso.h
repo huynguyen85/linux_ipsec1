@@ -1,6 +1,7 @@
 #include "en.h"
 #include "en_accel/ipsec.h"
 #include "linux/dma-mapping.h"
+#include "en/txrx.h"
 
 #ifndef __MLX5_EN_ASO_H__
 #define __MLX5_EN_ASO_H__
@@ -13,7 +14,7 @@ enum {
 };
 
 #define ASO_OPC_MOD_IPSEC_SHIFTED (MLX5_ACCESS_ASO_OPC_MOD_IPSEC << MLX5_WQE_CTRL_WQE_OPC_MOD_SHIFT)
-#define ASO_CTRL_READ_EN BIT(1)
+#define ASO_CTRL_READ_EN BIT(0)
 struct mlx5e_aso_wqe {
 	struct mlx5_wqe_ctrl_seg		ctrl;
 	struct mlx5_wqe_aso_ctrl_seg		aso_ctrl;
@@ -22,5 +23,6 @@ struct mlx5e_aso_wqe {
 
 int mlx5e_aso_reg_mr(struct mlx5e_priv *priv);
 void mlx5e_aso_dereg_mr(struct mlx5e_priv *priv);
+int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id);
 
 #endif

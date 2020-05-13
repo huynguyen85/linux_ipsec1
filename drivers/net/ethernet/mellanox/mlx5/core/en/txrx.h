@@ -98,6 +98,9 @@ mlx5e_fill_sq_frag_edge(struct mlx5e_txqsq *sq, struct mlx5_wq_cyc *wq,
 	sq->stats->nop += nnops;
 }
 
+void mlx5e_fill_icosq_frag_edge(struct mlx5e_icosq *sq,  struct mlx5_wq_cyc *wq,
+				u16 pi, u16 nnops);
+
 static inline void
 mlx5e_notify_hw(struct mlx5_wq_cyc *wq, u16 pc, void __iomem *uar_map,
 		struct mlx5_wqe_ctrl_seg *ctrl)

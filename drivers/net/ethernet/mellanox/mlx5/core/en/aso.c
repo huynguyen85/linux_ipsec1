@@ -100,7 +100,10 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 
 	aso_ctrl->va_l  = cpu_to_be32((aso->dma_addr & 0xFFFFFFFF) | ASO_CTRL_READ_EN);
 	aso_ctrl->va_h  = cpu_to_be32(aso->dma_addr >> 32);
-	aso_ctrl->l_key = cpu_to_be32(aso->mkey.key);
+	// Huy To do aso_ctrl->l_key = cpu_to_be32(aso->mkey.key);
+	aso_ctrl->l_key = cpu_to_be32(0);
+
+	printk("aso->dma_addr=0x%lx, aso_ctrl->va_l=0x%x, aso_ctrl->va_h=0x%x\n", aso->dma_addr, aso_ctrl->va_l, aso_ctrl->va_h);
 }
 
 
@@ -136,6 +139,8 @@ int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
 
 	printk("mlx5e_aso_query_ipsec_aso 002 \n");
 	mlx5e_poll_ico_cq(&sq->cq);
+
+	printk("MLX5_GET(ipsec_aso, aso_ctx, mode)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, mode));
 
 	return 0;
 }

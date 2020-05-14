@@ -158,7 +158,7 @@ static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
 	}
 
 	MLX5_SET(ipsec_obj, obj, dekn, attrs->enc_key_id);
-	MLX5_SET(ipsec_obj, obj, full_offload, attrs->flags & MLX5_IPSEC_FLAG_FULL_OFFLOAD);
+	MLX5_SET(ipsec_obj, obj, full_offload, attrs->flags | MLX5_IPSEC_FLAG_FULL_OFFLOAD);
 
 
 	/* general object fields set */

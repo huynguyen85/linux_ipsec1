@@ -513,6 +513,52 @@ static int handle_hca_cap_odp(struct mlx5_core_dev *dev)
 	return err;
 }
 
+static int handle_hca_cap_ipsec(struct mlx5_core_dev *dev)
+{
+	void *set_ctx;
+	void *set_hca_cap;
+	int set_sz = MLX5_ST_SZ_BYTES(set_hca_cap_in);
+	int req_endianness;
+	int err;
+
+	if (!MLX5_CAP_GEN(dev, ipsec_offload) || !MLX5_CAP_GEN(dev, eswitch_manager))
+		return 0;
+
+	err = mlx5_core_get_caps(dev, MLX5_CAP_IPSEC);
+	if (err)
+		return err;
+
+	mlx5_core_err(dev, "MLX5_CAP_GEN(mdev, ipsec_offload)=%d\n", MLX5_CAP_GEN(dev, ipsec_offload));
+	mlx5_core_err(dev, "MLX5_CAP_IPSEC_MAX(mdev, ipsec_full_offload)=%d\n", MLX5_CAP_IPSEC_MAX(dev, ipsec_full_offload));
+	mlx5_core_err(dev, "MLX5_CAP_GEN(mdev, eswitch_manager)=%d\n", MLX5_CAP_GEN(dev, eswitch_manager));
+	mlx5_core_err(dev, "MLX5_CAP_IPSEC(mdev, ipsec_crypto_offload)=%d\n", MLX5_CAP_IPSEC(dev, ipsec_crypto_offload));
+	mlx5_core_err(dev, "MLX5_CAP_IPSEC_MAX(mdev, ipsec_crypto_offload)=%d\n", MLX5_CAP_IPSEC_MAX(dev, ipsec_crypto_offload));
+
+	if (!MLX5_CAP_IPSEC_MAX(dev, ipsec_full_offload))
+		return 0;
+
+	set_ctx = kzalloc(set_sz, GFP_KERNEL);
+	if (!set_ctx)
+		return -ENOMEM;
+
+	set_hca_cap = MLX5_ADDR_OF(set_hca_cap_in, set_ctx, capability);
+
+	memcpy(set_hca_cap, dev->caps.hca_cur[MLX5_CAP_IPSEC], MLX5_ST_SZ_BYTES(ipsec_cap));
+
+	MLX5_SET(ipsec_cap, set_hca_cap, ipsec_full_offload, 1);
+	MLX5_SET(ipsec_cap, set_hca_cap, ipsec_crypto_offload, 0);
+	err = set_caps(dev, set_ctx, set_sz, MLX5_SET_HCA_CAP_OP_MOD_IPSEC);
+	if (err)
+		goto out;
+
+	mlx5_core_err(dev, "set ipsec cap err=%d\n", err);
+
+	err = mlx5_core_get_caps(dev, MLX5_CAP_IPSEC);
+out:
+	kfree(set_ctx);
+	return err;
+}
+
 static int handle_hca_cap(struct mlx5_core_dev *dev)
 {
 	void *set_ctx = NULL;
@@ -607,6 +653,10 @@ static int set_hca_cap(struct mlx5_core_dev *dev)
 		mlx5_core_err(dev, "handle_hca_cap_odp failed\n");
 		goto out;
 	}
+
+	err = handle_hca_cap_ipsec(dev);
+	if (err)
+		mlx5_core_err(dev, "handle_hca_cap_ipsec failed %d\n", err);
 
 out:
 	return err;

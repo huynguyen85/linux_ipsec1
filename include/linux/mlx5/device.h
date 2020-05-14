@@ -1328,6 +1328,9 @@ enum mlx5_qcam_feature_groups {
 #define MLX5_CAP_IPSEC(mdev, cap)\
 	MLX5_GET(ipsec_cap, (mdev)->caps.hca_cur[MLX5_CAP_IPSEC], cap)
 
+#define MLX5_CAP_IPSEC_MAX(mdev, cap)\
+	MLX5_GET(ipsec_cap, (mdev)->caps.hca_max[MLX5_CAP_IPSEC], cap)
+
 enum {
 	MLX5_CMD_STAT_OK			= 0x0,
 	MLX5_CMD_STAT_INT_ERR			= 0x1,

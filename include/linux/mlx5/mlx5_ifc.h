@@ -74,6 +74,7 @@ enum {
 	MLX5_SET_HCA_CAP_OP_MOD_GENERAL_DEVICE        = 0x0,
 	MLX5_SET_HCA_CAP_OP_MOD_ODP                   = 0x2,
 	MLX5_SET_HCA_CAP_OP_MOD_ATOMIC                = 0x3,
+	MLX5_SET_HCA_CAP_OP_MOD_IPSEC                 = 0x15,
 };
 
 enum {

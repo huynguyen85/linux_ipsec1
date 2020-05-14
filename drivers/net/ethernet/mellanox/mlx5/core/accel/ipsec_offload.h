@@ -47,8 +47,11 @@ static inline bool mlx5_is_ipsec_device(struct mlx5_core_dev *mdev)
 	if (!(MLX5_CAP_GEN_64(mdev, general_obj_types) &
 	    MLX5_HCA_CAP_GENERAL_OBJECT_TYPES_IPSEC))
 		return false;
-	printk_once("%s:%d - IPSEC full offload support = %d.\n",__func__,__LINE__,MLX5_CAP_IPSEC(mdev, ipsec_full_offload));
-	return MLX5_CAP_IPSEC(mdev, ipsec_crypto_offload) &&
+	printk_once("%s:%d - current IPSEC full offload support = %d.\n",__func__,__LINE__,MLX5_CAP_IPSEC(mdev, ipsec_full_offload));
+	printk_once("%s:%d - max IPSEC full offload support = %d.\n",__func__,__LINE__,MLX5_CAP_IPSEC_MAX(mdev, ipsec_full_offload));
+	printk_once("%s:%d - current IPSEC crypto offload support = %d.\n",__func__,__LINE__,MLX5_CAP_IPSEC(mdev, ipsec_crypto_offload));
+
+	return MLX5_CAP_IPSEC(mdev, ipsec_full_offload) &&
 		MLX5_CAP_ETH(mdev, insert_trailer);
 }
 

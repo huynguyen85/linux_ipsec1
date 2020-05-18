@@ -10558,8 +10558,6 @@ struct mlx5_ifc_ipsec_aso_bits {
 	u8         mode_parameter[0x20];
 
 	u8         replay_protection_window[0x100];
-
-	u8         reserved_at_400[0x400];
 };
 
 struct mlx5_ifc_ipsec_obj_bits {

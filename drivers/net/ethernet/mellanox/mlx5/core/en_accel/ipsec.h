@@ -78,7 +78,7 @@ struct mlx5e_ipsec_stats {
 struct mlx5e_ipsec_aso {
 	struct mlx5_core_mkey mkey;
 	dma_addr_t dma_addr;
-	u32 ctx[MLX5_ST_SZ_DW(ipsec_aso)];
+	void *ctx;
 	size_t size;
 	u32 pdn;
 };

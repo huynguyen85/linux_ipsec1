@@ -35,6 +35,9 @@ int mlx5e_aso_reg_mr(struct mlx5e_priv *priv)
 	dma_addr_t dma_addr;
 	int err;
 
+	aso->ctx = kzalloc(size, GFP_KERNEL);
+	if (!aso->ctx)
+		return -ENOMEM;
 /*
 	err = mlx5_core_alloc_pd(mdev, &aso->pdn);
 	if (err) {
@@ -43,6 +46,7 @@ int mlx5e_aso_reg_mr(struct mlx5e_priv *priv)
 	}
 	mlx5_core_err(mdev, "aso->pdn=0x%x\n", aso->pdn);
 */
+	printk("mlx5e_aso_reg_mr size=%d, sizeof(aso->ctx)=%d\n", size, sizeof(aso->ctx));
 	dma_addr = dma_map_single(dma_device, aso->ctx, size, DMA_BIDIRECTIONAL);
 	err = dma_mapping_error(dma_device, dma_addr);
 	if (err) {
@@ -69,6 +73,7 @@ int mlx5e_aso_reg_mr(struct mlx5e_priv *priv)
 
 out_dma:
 //	mlx5_core_dealloc_pd(mdev, aso->pdn);
+	kfree(aso->ctx);
 	return err;	
 }
 
@@ -79,6 +84,7 @@ void mlx5e_aso_dereg_mr(struct mlx5e_priv *priv)
 //	mlx5_core_destroy_mkey(priv->mdev, &aso->mkey);
 	dma_unmap_single(&priv->mdev->pdev->dev, aso->dma_addr, aso->size, DMA_BIDIRECTIONAL);
 //	mlx5_core_dealloc_pd(priv->mdev, aso->pdn);
+	kfree(aso->ctx);
 }
 
 static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
@@ -98,7 +104,7 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 	cseg->fm_ce_se   = MLX5_WQE_CTRL_CQ_UPDATE;
 	cseg->general_id = cpu_to_be32(ipsec_obj_id);
 
-	aso_ctrl->va_l  = cpu_to_be32((aso->dma_addr & 0xFFFFFFFF) | ASO_CTRL_READ_EN);
+	aso_ctrl->va_l  = cpu_to_be32(aso->dma_addr | ASO_CTRL_READ_EN);
 	aso_ctrl->va_h  = cpu_to_be32(aso->dma_addr >> 32);
 	// Huy To do aso_ctrl->l_key = cpu_to_be32(aso->mkey.key);
 	aso_ctrl->l_key = cpu_to_be32(0);
@@ -141,6 +147,7 @@ int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
 	mlx5e_poll_ico_cq(&sq->cq);
 
 	printk("MLX5_GET(ipsec_aso, aso_ctx, mode)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, mode));
+	print_hex_dump(KERN_ERR, "ipsec_aso: ", DUMP_PREFIX_ADDRESS, 16, 1, aso->ctx, aso->size, false);
 
 	return 0;
 }

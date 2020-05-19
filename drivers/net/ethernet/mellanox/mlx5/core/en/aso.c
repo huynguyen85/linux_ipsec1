@@ -152,6 +152,55 @@ int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
 	return 0;
 }
 
+void mlx5e_aso_build_cq_param(struct mlx5e_priv *priv,
+			      struct mlx5e_cq_param *param)
+{
+	void *cqc = param->cqc;
+
+	MLX5_SET(cqc, cqc, log_cq_size, 0);
+
+	mlx5e_build_common_cq_param(priv, param);
+	param->cq_period_mode = DIM_CQ_PERIOD_MODE_START_FROM_EQE;
+}
+
+void mlx5e_aso_build_param(struct mlx5e_priv *priv, struct mlx5e_ipsec_aso *aso)
+{
+
+	mlx5e_aso_build_cq_param(priv, &aso->cq_param);
+}
+
+void mlx5e_aso_setup(struct mlx5e_priv *priv, struct mlx5e_channel *c)
+{
+	struct dim_cq_moder icocq_moder = {0, 0};
+	struct mlx5e_ipsec_aso *aso;
+	int err;
+
+	/* Huy to do check cap */
+	if (!priv->ipsec)
+		return;
+
+	aso = &priv->ipsec->aso;
+
+	mlx5e_aso_build_param(priv, aso);
+	err = mlx5e_open_cq(c, icocq_moder, &aso->cq_param, &aso->cq);
+	if (err)
+		return;
+
+	/* Huy To do Skip cq arm */
+
+	printk("aso->cq.mcq.cqn=0x%x\n", aso->cq.mcq.cqn);
+}
+
+void mlx5e_aso_cleanup(struct mlx5e_priv *priv)
+{
+	struct mlx5e_ipsec_aso *aso;
+
+	if (!priv->ipsec)
+		return;
+
+	aso = &priv->ipsec->aso;
+	mlx5e_close_cq(&aso->cq);
+}
 
 /*
 void mlx5e_build_asosq_param(struct mlx5e_priv *priv,

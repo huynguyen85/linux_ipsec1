@@ -2,6 +2,7 @@
 #include "en_accel/ipsec.h"
 #include "linux/dma-mapping.h"
 #include "en/txrx.h"
+#include "en/params.h"
 
 #ifndef __MLX5_EN_ASO_H__
 #define __MLX5_EN_ASO_H__
@@ -21,8 +22,20 @@ struct mlx5e_aso_wqe {
 	struct mlx5_wqe_aso_data_seg		aso_data;
 };
 
+struct mlx5e_ipsec_aso {
+	struct mlx5_core_mkey mkey;
+	dma_addr_t dma_addr;
+	void *ctx;
+	size_t size;
+	u32 pdn;
+	struct mlx5e_cq_param cq_param;
+	struct mlx5e_cq cq;
+};
+
 int mlx5e_aso_reg_mr(struct mlx5e_priv *priv);
 void mlx5e_aso_dereg_mr(struct mlx5e_priv *priv);
 int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id);
+void mlx5e_aso_setup(struct mlx5e_priv *priv, struct mlx5e_channel *c);
+void mlx5e_aso_cleanup(struct mlx5e_priv *priv);
 
 #endif

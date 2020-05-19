@@ -41,6 +41,7 @@
 #include <linux/idr.h>
 
 #include "accel/ipsec.h"
+#include "en/aso.h"
 
 #define MLX5E_IPSEC_SADB_RX_BITS 10
 #define MLX5E_IPSEC_ESN_SCOPE_MID 0x80000000L
@@ -73,14 +74,6 @@ struct mlx5e_ipsec_stats {
 	u64 ipsec_del_sa_success;
 	u64 ipsec_del_sa_fail;
 	u64 ipsec_cmd_drop;
-};
-
-struct mlx5e_ipsec_aso {
-	struct mlx5_core_mkey mkey;
-	dma_addr_t dma_addr;
-	void *ctx;
-	size_t size;
-	u32 pdn;
 };
 
 struct mlx5e_ipsec {

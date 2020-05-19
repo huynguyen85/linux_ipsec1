@@ -66,6 +66,7 @@
 #include "en/devlink.h"
 #include "lib/mlx5.h"
 #include "en_accel/ipsec_steering.h"
+#include "en/aso.h"
 
 #define DEBUG_FL(format,...) if(1) {printk("%s:%d - "format"\n",__func__,__LINE__,##__VA_ARGS__);}
 
@@ -2174,8 +2175,8 @@ static void mlx5e_build_sq_param(struct mlx5e_priv *priv,
 	MLX5_SET(sqc, sqc, allow_swp, allow_swp);
 }
 
-static void mlx5e_build_common_cq_param(struct mlx5e_priv *priv,
-					struct mlx5e_cq_param *param)
+void mlx5e_build_common_cq_param(struct mlx5e_priv *priv,
+				 struct mlx5e_cq_param *param)
 {
 	void *cqc = param->cqc;
 
@@ -2322,6 +2323,8 @@ int mlx5e_open_channels(struct mlx5e_priv *priv,
 			goto err_close_channels;
 	}
 
+	mlx5e_aso_setup(priv, chs->c[0]);
+ 
 	mlx5e_health_channels_update(priv);
 	kvfree(cparam);
 	return 0;
@@ -2376,6 +2379,9 @@ static void mlx5e_deactivate_channels(struct mlx5e_channels *chs)
 void mlx5e_close_channels(struct mlx5e_channels *chs)
 {
 	int i;
+
+	if (chs->num)
+		mlx5e_aso_cleanup(chs->c[0]->priv);
 
 	for (i = 0; i < chs->num; i++)
 		mlx5e_close_channel(chs->c[i]);

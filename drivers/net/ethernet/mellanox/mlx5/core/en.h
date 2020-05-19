@@ -1232,4 +1232,6 @@ int mlx5e_set_vf_rate(struct net_device *dev, int vf, int min_tx_rate, int max_t
 int mlx5e_get_vf_config(struct net_device *dev, int vf, struct ifla_vf_info *ivi);
 int mlx5e_get_vf_stats(struct net_device *dev, int vf, struct ifla_vf_stats *vf_stats);
 #endif
+void mlx5e_build_common_cq_param(struct mlx5e_priv *priv,
+				 struct mlx5e_cq_param *param);
 #endif /* __MLX5_EN_H__ */

@@ -73,6 +73,7 @@ struct mlxbf_gige {
 	void __iomem *gpio_io;
 	void __iomem *cause_rsh_coalesce0_io;
 	void __iomem *cause_gpio_arm_coalesce0_io;
+	spinlock_t lock;
 	spinlock_t gpio_lock;
 	u16 rx_q_entries;
 	u16 tx_q_entries;

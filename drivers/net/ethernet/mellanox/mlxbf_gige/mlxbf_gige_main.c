@@ -431,6 +431,9 @@ static void mlxbf_gige_get_ethtool_stats(struct net_device *netdev,
 					 u64 *data)
 {
 	struct mlxbf_gige *priv = netdev_priv(netdev);
+	unsigned long flags;
+
+	spin_lock_irqsave(&priv->lock, flags);
 
 	/* Fill data array with interface statistics
 	 *
@@ -466,6 +469,8 @@ static void mlxbf_gige_get_ethtool_stats(struct net_device *netdev,
 		   readq(priv->base + MLXBF_GIGE_RX_PASS_COUNTER_ALL));
 	*data++ = (priv->stats.rx_filter_discard_pkts +
 		   readq(priv->base + MLXBF_GIGE_RX_DISC_COUNTER_ALL));
+
+	spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 static const struct ethtool_ops mlxbf_gige_ethtool_ops = {
@@ -1139,6 +1144,9 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, priv);
 	priv->dev = &pdev->dev;
 	priv->pdev = pdev;
+
+	spin_lock_init(&priv->lock);
+	spin_lock_init(&priv->gpio_lock);
 
 	/* Attach MDIO device */
 	err = mlxbf_gige_mdio_probe(pdev, priv);

@@ -229,20 +229,22 @@ static int mlxbf_gige_mdio_write(struct mii_bus *bus, int phy_add,
 
 static void mlxbf_gige_mdio_disable_gpio12_irq(struct mlxbf_gige *priv)
 {
+	unsigned long flags;
 	u32 val;
 
-	spin_lock(&priv->gpio_lock);
+	spin_lock_irqsave(&priv->gpio_lock, flags);
 	val = readl(priv->gpio_io + MLXBF_GIGE_GPIO_CAUSE_OR_EVTEN0);
 	val &= ~MLXBF_GIGE_CAUSE_OR_EVTEN0_MASK;
 	writel(val, priv->gpio_io + MLXBF_GIGE_GPIO_CAUSE_OR_EVTEN0);
-	spin_unlock(&priv->gpio_lock);
+	spin_unlock_irqrestore(&priv->gpio_lock, flags);
 }
 
 static void mlxbf_gige_mdio_enable_gpio12_irq(struct mlxbf_gige *priv)
 {
+	unsigned long flags;
 	u32 val;
 
-	spin_lock(&priv->gpio_lock);
+	spin_lock_irqsave(&priv->gpio_lock, flags);
 	/* The INT_N interrupt level is active low.
 	 * So enable cause fall bit to detect when GPIO
 	 * state goes low.
@@ -257,7 +259,7 @@ static void mlxbf_gige_mdio_enable_gpio12_irq(struct mlxbf_gige *priv)
 	val |= MLXBF_GIGE_CAUSE_OR_EVTEN0_MASK;
 	writel(val, priv->gpio_io +
 			MLXBF_GIGE_GPIO_CAUSE_OR_EVTEN0);
-	spin_unlock(&priv->gpio_lock);
+	spin_unlock_irqrestore(&priv->gpio_lock, flags);
 }
 
 /* Interrupt handler is called from mlxbf_gige_main.c

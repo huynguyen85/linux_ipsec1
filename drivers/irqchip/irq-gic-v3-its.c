@@ -41,6 +41,7 @@
 #define ITS_FLAGS_WORKAROUND_CAVIUM_22375	(1ULL << 1)
 #define ITS_FLAGS_WORKAROUND_CAVIUM_23144	(1ULL << 2)
 #define ITS_FLAGS_SAVE_SUSPEND_STATE		(1ULL << 3)
+#define ITS_FLAGS_WORKAROUND_BLUEFIELD2  	(1ULL << 4)
 
 #define RDIST_FLAGS_PROPBASE_NEEDS_FLUSHING	(1 << 0)
 #define RDIST_FLAGS_RD_TABLES_PREALLOCATED	(1 << 1)
@@ -116,7 +117,7 @@ struct its_node {
 	int			vlpi_redist_offset;
 };
 
-#define ITS_ITT_ALIGN		SZ_4K
+#define ITS_ITT_ALIGN		SZ_256
 
 /* The maximum number of VPEID bits supported by VLPI commands */
 #define ITS_MAX_VPEID_BITS	(16)
@@ -1749,6 +1750,9 @@ static void its_write_baser(struct its_node *its, struct its_baser *baser,
 
 	gits_write_baser(val, its->base + GITS_BASER + (idx << 3));
 	baser->val = its_read_baser(its, baser);
+
+	if (its->flags & ITS_FLAGS_WORKAROUND_BLUEFIELD2)
+		baser->val |= (GITS_BASER_InnerShareable | GITS_BASER_RaWaWb);
 }
 
 static int its_setup_baser(struct its_node *its, struct its_baser *baser,
@@ -3301,6 +3305,25 @@ static bool __maybe_unused its_enable_quirk_hip07_161600802(void *data)
 	return true;
 }
 
+
+static struct acpi_platform_list bf2_plat_info[] = {
+	{"MLNXT.", "MLX-BF00", 0, ACPI_SIG_MADT, all_versions},
+	{ }
+};
+
+static bool __maybe_unused its_enable_quirk_bluefield2(void *data)
+{
+	struct its_node *its = data;
+	int idx;
+
+	idx = acpi_match_platform_list(bf2_plat_info);
+	if (idx < 0)
+		return false;
+
+	its->flags |= ITS_FLAGS_WORKAROUND_BLUEFIELD2;
+	return true;
+}
+
 static const struct gic_quirk its_quirks[] = {
 #ifdef CONFIG_CAVIUM_ERRATUM_22375
 	{
@@ -3347,6 +3370,12 @@ static const struct gic_quirk its_quirks[] = {
 		.init	= its_enable_quirk_hip07_161600802,
 	},
 #endif
+	{
+		.desc	= "ITS: BlueField-2 erratum xxx",
+		.iidr	= 0x0001143b,
+		.mask	= 0xffffffff,
+		.init	= its_enable_quirk_bluefield2,
+	},
 	{
 	}
 };
@@ -3663,6 +3692,8 @@ static int __init its_probe_one(struct resource *res,
 
 	gits_write_cbaser(baser, its->base + GITS_CBASER);
 	tmp = gits_read_cbaser(its->base + GITS_CBASER);
+	if (its->flags & ITS_FLAGS_WORKAROUND_BLUEFIELD2)
+		tmp |= GITS_CBASER_InnerShareable;
 
 	if ((tmp ^ baser) & GITS_CBASER_SHAREABILITY_MASK) {
 		if (!(tmp & GITS_CBASER_SHAREABILITY_MASK)) {

@@ -108,14 +108,12 @@ mlx5e_notify_hw(struct mlx5_wq_cyc *wq, u16 pc, void __iomem *uar_map,
 	ctrl->fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
 	/* ensure wqe is visible to device before updating doorbell record */
 	dma_wmb();
-
 	*wq->db = cpu_to_be32(pc);
 
 	/* ensure doorbell record is visible to device before ringing the
 	 * doorbell
 	 */
 	wmb();
-
 	mlx5_write64((__be32 *)ctrl, uar_map);
 }
 

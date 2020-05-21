@@ -1169,14 +1169,6 @@ static void mlx5e_free_txqsq(struct mlx5e_txqsq *sq)
 	mlx5_wq_destroy(&sq->wq_ctrl);
 }
 
-struct mlx5e_create_sq_param {
-	struct mlx5_wq_ctrl        *wq_ctrl;
-	u32                         cqn;
-	u32                         tisn;
-	u8                          tis_lst_sz;
-	u8                          min_inline_mode;
-};
-
 static int mlx5e_create_sq(struct mlx5_core_dev *mdev,
 			   struct mlx5e_sq_param *param,
 			   struct mlx5e_create_sq_param *csp,
@@ -1253,15 +1245,15 @@ int mlx5e_modify_sq(struct mlx5_core_dev *mdev, u32 sqn,
 	return err;
 }
 
-static void mlx5e_destroy_sq(struct mlx5_core_dev *mdev, u32 sqn)
+void mlx5e_destroy_sq(struct mlx5_core_dev *mdev, u32 sqn)
 {
 	mlx5_core_destroy_sq(mdev, sqn);
 }
 
-static int mlx5e_create_sq_rdy(struct mlx5_core_dev *mdev,
-			       struct mlx5e_sq_param *param,
-			       struct mlx5e_create_sq_param *csp,
-			       u32 *sqn)
+int mlx5e_create_sq_rdy(struct mlx5_core_dev *mdev,
+			struct mlx5e_sq_param *param,
+			struct mlx5e_create_sq_param *csp,
+			u32 *sqn)
 {
 	struct mlx5e_modify_sq_param msp = {0};
 	int err;
@@ -1619,7 +1611,10 @@ static int mlx5e_create_cq(struct mlx5e_cq *cq, struct mlx5e_cq_param *param)
 	if (err)
 		return err;
 
-	mlx5e_cq_arm(cq);
+	if (!cq->is_aso)
+		mlx5e_cq_arm(cq);
+	else
+		printk("skip cq_arm\n");
 
 	return 0;
 }

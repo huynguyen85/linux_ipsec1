@@ -327,10 +327,11 @@ struct mlx5e_cq {
 	struct napi_struct        *napi;
 	struct mlx5_core_cq        mcq;
 	struct mlx5e_channel      *channel;
-
+	
 	/* control */
 	struct mlx5_core_dev      *mdev;
 	struct mlx5_wq_ctrl        wq_ctrl;
+	bool is_aso;
 } ____cacheline_aligned_in_smp;
 
 struct mlx5e_cq_decomp {
@@ -1234,4 +1235,18 @@ int mlx5e_get_vf_stats(struct net_device *dev, int vf, struct ifla_vf_stats *vf_
 #endif
 void mlx5e_build_common_cq_param(struct mlx5e_priv *priv,
 				 struct mlx5e_cq_param *param);
+
+struct mlx5e_create_sq_param {
+	struct mlx5_wq_ctrl        *wq_ctrl;
+	u32                         cqn;
+	u32                         tisn;
+	u8                          tis_lst_sz;
+	u8                          min_inline_mode;
+};
+
+void mlx5e_destroy_sq(struct mlx5_core_dev *mdev, u32 sqn);
+int mlx5e_create_sq_rdy(struct mlx5_core_dev *mdev,
+			struct mlx5e_sq_param *param,
+			struct mlx5e_create_sq_param *csp,
+			u32 *sqn);
 #endif /* __MLX5_EN_H__ */

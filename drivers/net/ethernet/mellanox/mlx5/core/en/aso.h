@@ -22,6 +22,32 @@ struct mlx5e_aso_wqe {
 	struct mlx5_wqe_aso_data_seg		aso_data;
 };
 
+struct mlx5e_asosq {
+	/* data path */
+	u16                        cc;
+	u16                        pc;
+
+	struct mlx5_wqe_ctrl_seg  *doorbell_cseg;
+	struct mlx5e_cq            cq;
+
+	/* write@xmit, read@completion */
+	struct {
+		struct mlx5e_sq_wqe_info *aso_wqe;
+	} db;
+
+	/* read only */
+	struct mlx5_wq_cyc         wq;
+	void __iomem              *uar_map;
+	u32                        sqn;
+	unsigned long              state;
+
+	/* control path */
+	struct mlx5_wq_ctrl        wq_ctrl;
+	//struct mlx5e_channel      *channel;
+	//
+	//struct work_struct         recover_ddwork;
+} ____cacheline_aligned_in_smp;
+
 struct mlx5e_ipsec_aso {
 	struct mlx5_core_mkey mkey;
 	dma_addr_t dma_addr;
@@ -29,7 +55,9 @@ struct mlx5e_ipsec_aso {
 	size_t size;
 	u32 pdn;
 	struct mlx5e_cq_param cq_param;
-	struct mlx5e_cq cq;
+	int cpu;
+	struct mlx5e_asosq sq;
+	struct mlx5e_sq_param sq_param;
 };
 
 int mlx5e_aso_reg_mr(struct mlx5e_priv *priv);

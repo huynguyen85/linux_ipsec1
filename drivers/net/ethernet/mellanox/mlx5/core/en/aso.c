@@ -1,6 +1,5 @@
 #include "aso.h"
 
-/*
 static int mlx5e_aso_create_mkey(struct mlx5_core_dev *mdev, u32 pdn, struct mlx5_core_mkey *mkey)
 {
 	int inlen = MLX5_ST_SZ_BYTES(create_mkey_in);
@@ -26,7 +25,6 @@ static int mlx5e_aso_create_mkey(struct mlx5_core_dev *mdev, u32 pdn, struct mlx
 	kvfree(in);
 	return err;
 }
-*/
 
 int mlx5e_aso_reg_mr(struct mlx5e_priv *priv)
 {
@@ -40,14 +38,14 @@ int mlx5e_aso_reg_mr(struct mlx5e_priv *priv)
 	aso->ctx = kzalloc(size, GFP_KERNEL);
 	if (!aso->ctx)
 		return -ENOMEM;
-/*
+
 	err = mlx5_core_alloc_pd(mdev, &aso->pdn);
 	if (err) {
 		mlx5_core_err(mdev, "alloc pd failed, %d\n", err);
 		return err;
 	}
 	mlx5_core_err(mdev, "aso->pdn=0x%x\n", aso->pdn);
-*/
+
 	printk("mlx5e_aso_reg_mr size=%d, sizeof(aso->ctx)=%d\n", size, sizeof(aso->ctx));
 	dma_addr = dma_map_single(dma_device, aso->ctx, size, DMA_BIDIRECTIONAL);
 	err = dma_mapping_error(dma_device, dma_addr);
@@ -57,24 +55,23 @@ int mlx5e_aso_reg_mr(struct mlx5e_priv *priv)
 	}
 
 	/* Huy to do aso_pdn */
-/*
 	err = mlx5e_aso_create_mkey(mdev, aso->pdn, &aso->mkey);
 	if (err) {
 		mlx5_core_warn(mdev, "Can't create mkey\n");
 		goto out_mkey;
 	}
-*/
+
 	mlx5_core_err(mdev, "Huy dma_addr=0x%lx, aso->mkey.key=0x%x\n", dma_addr, aso->mkey.key);
 
 	aso->dma_addr = dma_addr;
 	aso->size = size;
 	return 0;
 
-//out_mkey:
-//	dma_unmap_single(dma_device, dma_addr, size, DMA_BIDIRECTIONAL);
+out_mkey:
+	dma_unmap_single(dma_device, dma_addr, size, DMA_BIDIRECTIONAL);
 
 out_dma:
-//	mlx5_core_dealloc_pd(mdev, aso->pdn);
+	mlx5_core_dealloc_pd(mdev, aso->pdn);
 	kfree(aso->ctx);
 	return err;	
 }
@@ -83,9 +80,9 @@ void mlx5e_aso_dereg_mr(struct mlx5e_priv *priv)
 {
 	struct mlx5e_ipsec_aso *aso = &priv->ipsec->aso;
 
-//	mlx5_core_destroy_mkey(priv->mdev, &aso->mkey);
+	mlx5_core_destroy_mkey(priv->mdev, &aso->mkey);
 	dma_unmap_single(&priv->mdev->pdev->dev, aso->dma_addr, aso->size, DMA_BIDIRECTIONAL);
-//	mlx5_core_dealloc_pd(priv->mdev, aso->pdn);
+	mlx5_core_dealloc_pd(priv->mdev, aso->pdn);
 	kfree(aso->ctx);
 }
 
@@ -108,8 +105,8 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 
 	aso_ctrl->va_l  = cpu_to_be32(aso->dma_addr | ASO_CTRL_READ_EN);
 	aso_ctrl->va_h  = cpu_to_be32(aso->dma_addr >> 32);
-	// Huy To do aso_ctrl->l_key = cpu_to_be32(aso->mkey.key);
-	aso_ctrl->l_key = cpu_to_be32(0);
+	aso_ctrl->l_key = cpu_to_be32(aso->mkey.key);
+	//aso_ctrl->l_key = cpu_to_be32(0);
 
 	printk("aso->dma_addr=0x%lx, aso_ctrl->va_l=0x%x, aso_ctrl->va_h=0x%x\n", aso->dma_addr, aso_ctrl->va_l, aso_ctrl->va_h);
 }

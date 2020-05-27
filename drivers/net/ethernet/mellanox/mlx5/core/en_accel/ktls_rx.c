@@ -6,6 +6,9 @@
 #include "en_accel/ktls_utils.h"
 #include "en_accel/fs_tcp.h"
 
+#define KTLS_STATS_INC(priv, rxq, fld) \
+		((priv)->channels.c[rxq]->rq.stats->fld++)
+
 struct accel_rule {
 	struct work_struct work;
 	struct mlx5e_priv *priv;
@@ -218,10 +221,14 @@ void mlx5e_ktls_handle_rx_skb(struct mlx5e_rq *rq, struct sk_buff *skb,
 	switch (tls_offload) {
 	case CQE_TLS_OFFLOAD_DECRYPTED:
 		skb->decrypted = 1;
+		rq->stats->tls_decrypted_packets++;
+		rq->stats->tls_decrypted_bytes += *cqe_bcnt;
 		break;
 	case CQE_TLS_OFFLOAD_RESYNC:
+		rq->stats->tls_ooo++;
 		break;
 	default: /* CQE_TLS_OFFLOAD_ERROR: */
+		rq->stats->tls_err++;
 		break;
 	}
 }
@@ -280,6 +287,8 @@ int mlx5e_ktls_add_rx(struct net_device *netdev, struct sock *sk,
 	if (err)
 		goto err_post_wqes;
 
+	KTLS_STATS_INC(priv, rxq, tls_ctx);
+
 	return 0;
 
 err_post_wqes:
@@ -308,6 +317,7 @@ void mlx5e_ktls_del_rx(struct net_device *netdev, struct tls_context *tls_ctx)
 		 */
 		wait_for_completion(&priv_rx->add_ctx);
 
+	KTLS_STATS_INC(priv, priv_rx->rxq, tls_del);
 	if (priv_rx->rule.rule)
 		mlx5e_accel_fs_del_sk(priv_rx->rule.rule);
 

@@ -163,6 +163,14 @@ static const struct counter_desc sw_stats_desc[] = {
 	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, rx_congst_umr) },
 	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, rx_arfs_err) },
 	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, rx_recover) },
+#ifdef CONFIG_MLX5_EN_TLS
+	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, rx_tls_decrypted_packets) },
+	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, rx_tls_decrypted_bytes) },
+	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, rx_tls_ctx) },
+	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, rx_tls_del) },
+	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, rx_tls_ooo) },
+	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, rx_tls_err) },
+#endif
 	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, ch_events) },
 	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, ch_poll) },
 	{ MLX5E_DECLARE_STAT(struct mlx5e_sw_stats, ch_arm) },
@@ -275,6 +283,14 @@ static MLX5E_DECLARE_STATS_GRP_OP_UPDATE_STATS(sw)
 		s->rx_congst_umr  += rq_stats->congst_umr;
 		s->rx_arfs_err    += rq_stats->arfs_err;
 		s->rx_recover     += rq_stats->recover;
+#ifdef CONFIG_MLX5_EN_TLS
+		s->rx_tls_decrypted_packets += rq_stats->tls_decrypted_packets;
+		s->rx_tls_decrypted_bytes   += rq_stats->tls_decrypted_bytes;
+		s->rx_tls_ctx               += rq_stats->tls_ctx;
+		s->rx_tls_del               += rq_stats->tls_del;
+		s->rx_tls_ooo               += rq_stats->tls_ooo;
+		s->rx_tls_err               += rq_stats->tls_err;
+#endif
 		s->ch_events      += ch_stats->events;
 		s->ch_poll        += ch_stats->poll;
 		s->ch_arm         += ch_stats->arm;
@@ -1475,6 +1491,14 @@ static const struct counter_desc rq_stats_desc[] = {
 	{ MLX5E_DECLARE_RX_STAT(struct mlx5e_rq_stats, congst_umr) },
 	{ MLX5E_DECLARE_RX_STAT(struct mlx5e_rq_stats, arfs_err) },
 	{ MLX5E_DECLARE_RX_STAT(struct mlx5e_rq_stats, recover) },
+#ifdef CONFIG_MLX5_EN_TLS
+	{ MLX5E_DECLARE_RX_STAT(struct mlx5e_rq_stats, tls_decrypted_packets) },
+	{ MLX5E_DECLARE_RX_STAT(struct mlx5e_rq_stats, tls_decrypted_bytes) },
+	{ MLX5E_DECLARE_RX_STAT(struct mlx5e_rq_stats, tls_ctx) },
+	{ MLX5E_DECLARE_RX_STAT(struct mlx5e_rq_stats, tls_del) },
+	{ MLX5E_DECLARE_RX_STAT(struct mlx5e_rq_stats, tls_ooo) },
+	{ MLX5E_DECLARE_RX_STAT(struct mlx5e_rq_stats, tls_err) },
+#endif
 };
 
 static const struct counter_desc sq_stats_desc[] = {

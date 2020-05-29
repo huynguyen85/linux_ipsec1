@@ -481,12 +481,7 @@ int mlx5e_ktls_rx_resync(struct net_device *netdev, struct sock *sk,
 void mlx5e_ktls_handle_rx_skb(struct mlx5e_rq *rq, struct sk_buff *skb,
 			      struct mlx5_cqe64 *cqe, u32 *cqe_bcnt)
 {
-	u8 tls_offload = get_cqe_tls_offload(cqe);
-
-	if (likely(tls_offload == CQE_TLS_OFFLOAD_NOT_DECRYPTED))
-		return;
-
-	switch (tls_offload) {
+	switch (get_cqe_tls_offload(cqe)) {
 	case CQE_TLS_OFFLOAD_DECRYPTED:
 		skb->decrypted = 1;
 		rq->stats->tls_decrypted_packets++;

@@ -802,7 +802,7 @@ static void mlxbf_gige_free_irqs(struct mlxbf_gige *priv)
 static int mlxbf_gige_open(struct net_device *netdev)
 {
 	struct mlxbf_gige *priv = netdev_priv(netdev);
-	struct phy_device *phydev;
+	struct phy_device *phydev = netdev->phydev;
 	u64 int_en;
 	int err;
 
@@ -818,40 +818,12 @@ static int mlxbf_gige_open(struct net_device *netdev)
 	if (err)
 		return err;
 
-	phydev = phy_find_first(priv->mdiobus);
-	if (!phydev)
-		return -EIO;
-
-	/* Sets netdev->phydev to phydev; which will eventually
-	 * be used in ioctl calls.
-	 */
-	err = phy_connect_direct(netdev, phydev,
-				 mlxbf_gige_handle_link_change,
-				 PHY_INTERFACE_MODE_GMII);
-	if (err) {
-		netdev_err(netdev, "Could not attach to PHY\n");
-		return err;
-	}
-
-	/* MAC only supports 1000T full duplex mode */
-	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_1000baseT_Half_BIT);
-	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_100baseT_Full_BIT);
-	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_100baseT_Half_BIT);
-	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_10baseT_Full_BIT);
-	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_10baseT_Half_BIT);
-
-	/* MAC supports symmetric flow control */
-	phy_support_sym_pause(phydev);
 	phy_start(phydev);
 	err = phy_start_aneg(phydev);
 	if (err < 0) {
 		netdev_err(netdev, "phy_start_aneg failure: 0x%x\n", err);
 		return err;
 	}
-
-	/* Display information about attached PHY device */
-	phy_attached_info(phydev);
-
 
 	/* Set bits in INT_EN that we care about */
 	int_en = MLXBF_GIGE_INT_EN_HW_ACCESS_ERROR |
@@ -911,8 +883,8 @@ static int mlxbf_gige_stop(struct net_device *netdev)
 	netif_napi_del(&priv->napi);
 	mlxbf_gige_free_irqs(priv);
 
-	phy_stop(netdev->phydev);
-	phy_disconnect(netdev->phydev);
+	if (netdev->phydev)
+		phy_stop(netdev->phydev);
 
 	mlxbf_gige_rx_deinit(priv);
 	mlxbf_gige_tx_deinit(priv);
@@ -1087,6 +1059,7 @@ static void mlxbf_gige_initial_mac(struct mlxbf_gige *priv)
 
 static int mlxbf_gige_probe(struct platform_device *pdev)
 {
+	struct phy_device *phydev;
 	struct net_device *netdev;
 	struct resource *mac_res;
 	struct resource *llu_res;
@@ -1138,9 +1111,6 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 	priv = netdev_priv(netdev);
 	priv->netdev = netdev;
 
-	/* Initialize feature set supported by hardware (skbuff.h) */
-	netdev->hw_features = NETIF_F_RXCSUM | NETIF_F_HW_CSUM;
-
 	platform_set_drvdata(pdev, priv);
 	priv->dev = &pdev->dev;
 	priv->pdev = pdev;
@@ -1173,6 +1143,34 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 	priv->rx_irq = platform_get_irq(pdev, MLXBF_GIGE_RECEIVE_PKT_INTR_IDX);
 	priv->llu_plu_irq = platform_get_irq(pdev, MLXBF_GIGE_LLU_PLU_INTR_IDX);
 
+	phydev = phy_find_first(priv->mdiobus);
+	if (!phydev)
+		return -EIO;
+
+	/* Sets netdev->phydev to phydev; which will eventually
+	 * be used in ioctl calls.
+	 */
+	err = phy_connect_direct(netdev, phydev,
+				 mlxbf_gige_handle_link_change,
+				 PHY_INTERFACE_MODE_GMII);
+	if (err) {
+		dev_err(&pdev->dev, "Could not attach to PHY\n");
+		return err;
+	}
+
+	/* MAC only supports 1000T full duplex mode */
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_1000baseT_Half_BIT);
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_100baseT_Full_BIT);
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_100baseT_Half_BIT);
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_10baseT_Full_BIT);
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_10baseT_Half_BIT);
+
+	/* MAC supports symmetric flow control */
+	phy_support_sym_pause(phydev);
+
+	/* Display information about attached PHY device */
+	phy_attached_info(phydev);
+
 	err = register_netdev(netdev);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to register netdev\n");
@@ -1189,9 +1187,10 @@ static int mlxbf_gige_remove(struct platform_device *pdev)
 
 	priv = platform_get_drvdata(pdev);
 
+	phy_disconnect(priv->netdev->phydev);
+
 	unregister_netdev(priv->netdev);
 
-	/* Remove mdio */
 	mlxbf_gige_mdio_remove(priv);
 
 	platform_set_drvdata(pdev, NULL);

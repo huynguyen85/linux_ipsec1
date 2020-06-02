@@ -107,6 +107,9 @@ struct mlx5_accel_esp_xfrm_attrs {
 
 	u8 is_ipv6;
 	void *priv;
+
+	__u64   soft_packet_limit;
+	__u64   hard_packet_limit;
 };
 
 struct mlx5_accel_esp_xfrm {

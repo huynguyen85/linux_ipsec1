@@ -246,7 +246,9 @@ int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
 	mlx5e_poll_aso_cq(&sq->cq);
 
 	printk("MLX5_GET(ipsec_aso, aso_ctx, mode)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, mode));
-	//print_hex_dump("ipsec_aso: ", DUMP_PREFIX_ADDRESS, 16, 1, aso->ctx, aso->size, false);
+	printk("MLX5_GET(ipsec_aso, aso_ctx, remove_flow_soft_lft)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, remove_flow_soft_lft));
+	printk("MLX5_GET(ipsec_aso, aso_ctx, remove_flow_pkt_cnt)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt));
+	print_hex_dump(KERN_ERR, "ipsec_aso: ", DUMP_PREFIX_ADDRESS, 16, 1, aso->ctx, aso->size, false);
 
 	return 0;
 }

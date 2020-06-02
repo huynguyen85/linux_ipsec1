@@ -212,6 +212,13 @@ mlx5e_ipsec_build_accel_xfrm_attrs(struct mlx5e_ipsec_sa_entry *sa_entry,
 
 	/* netdev priv */
 	attrs->priv = netdev_priv(x->xso.dev);
+
+	/* full offload limit */
+	attrs->hard_packet_limit = x->lft.hard_packet_limit;
+	attrs->soft_packet_limit = x->lft.soft_packet_limit;
+
+	printk("attrs->hard_packet_limit =%d\n", attrs->hard_packet_limit);
+	printk("attrs->soft_packet_limit =%d\n", attrs->soft_packet_limit);
 }
 
 static inline int mlx5e_xfrm_validate_state(struct xfrm_state *x)
@@ -487,6 +494,12 @@ struct mlx5e_ipsec_modify_state_work {
 	struct mlx5e_ipsec_sa_entry	*sa_entry;
 };
 
+struct mlx5e_ipsec_async_work {
+	struct work_struct work;
+	struct mlx5e_priv *priv;         
+	u32 obj_id;
+};
+
 static void _update_xfrm_state(struct work_struct *work)
 {
 	int ret;
@@ -577,4 +590,35 @@ void mlx5e_ipsec_build_netdev(struct mlx5e_priv *priv)
 	netdev->features |= NETIF_F_GSO_ESP;
 	netdev->hw_features |= NETIF_F_GSO_ESP;
 	netdev->hw_enc_features |= NETIF_F_GSO_ESP;
+}
+
+static void _mlx5e_ipsec_async_event(struct work_struct *work)
+{
+	struct mlx5e_ipsec_async_work *async_work =
+		container_of(work, struct mlx5e_ipsec_async_work, work);
+	struct mlx5e_priv *priv = async_work->priv;
+	u32 obj_id = async_work->obj_id;
+	struct xfrm_state *xs;	
+
+	xs = mlx5e_ipsec_sadb_rx_lookup(priv->ipsec, obj_id);
+	printk("_mlx5e_ipsec_async_event obj_id=0x%d, xs=%p\n", obj_id, xs);
+
+	kfree(async_work);
+}
+
+int mlx5e_ipsec_async_event(struct mlx5e_priv *priv, u32 obj_id)
+{
+	struct mlx5e_ipsec_async_work *async_work;
+
+	async_work = kzalloc(sizeof(*async_work), GFP_ATOMIC);
+	if (!async_work)
+		return NOTIFY_DONE;
+
+	async_work->priv = priv;
+	async_work->obj_id = obj_id;
+
+	INIT_WORK(&async_work->work, _mlx5e_ipsec_async_event);
+	WARN_ON(!queue_work(priv->ipsec->wq, &async_work->work));
+
+	return NOTIFY_OK;
 }

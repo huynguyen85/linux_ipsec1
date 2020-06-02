@@ -1859,6 +1859,8 @@ static int uplink_rep_async_event(struct notifier_block *nb, unsigned long event
 {
 	struct mlx5e_priv *priv = container_of(nb, struct mlx5e_priv, events_nb);
 
+	mlx5_core_err(priv->mdev, "uplink_rep_async_event event=0x%x\n", event);
+
 	if (event == MLX5_EVENT_TYPE_PORT_CHANGE) {
 		struct mlx5_eqe *eqe = data;
 

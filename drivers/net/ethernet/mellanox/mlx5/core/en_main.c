@@ -194,10 +194,29 @@ void mlx5e_queue_update_stats(struct mlx5e_priv *priv)
 	queue_work(priv->wq, &priv->update_stats_work);
 }
 
+static int mlx5e_obj_change_event(struct mlx5e_priv *priv, struct mlx5_eqe *eqe)
+{
+	struct mlx5_eqe_obj_change *obj_change = &eqe->data.obj_change;
+	u16 obj_type = be16_to_cpu(obj_change->obj_type);
+	u32 obj_id = be32_to_cpu(obj_change->obj_id);
+
+	mlx5_core_err(priv->mdev, "en_main mlx5e_obj_change_event obj_type=0x%x, obj_id=0x%x\n", obj_type, obj_id);
+
+	if (obj_type == MLX5_GENERAL_OBJECT_TYPES_IPSEC)
+		return mlx5e_ipsec_async_event(priv, obj_id);
+
+	return NOTIFY_DONE;
+}
+
 static int async_event(struct notifier_block *nb, unsigned long event, void *data)
 {
 	struct mlx5e_priv *priv = container_of(nb, struct mlx5e_priv, events_nb);
 	struct mlx5_eqe   *eqe = data;
+
+	mlx5_core_err(priv->mdev, "en_main async_event event=0x%x\n", event);
+
+	if (event == MLX5_EVENT_TYPE_OBJECT_CHANGE_EVENT)
+		return mlx5e_obj_change_event(priv, eqe); 
 
 	if (event != MLX5_EVENT_TYPE_PORT_CHANGE)
 		return NOTIFY_DONE;

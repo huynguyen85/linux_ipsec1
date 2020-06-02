@@ -125,6 +125,7 @@ void mlx5e_ipsec_build_netdev(struct mlx5e_priv *priv);
 struct xfrm_state *mlx5e_ipsec_sadb_rx_lookup(struct mlx5e_ipsec *dev,
 					      unsigned int handle);
 
+int mlx5e_ipsec_async_event(struct mlx5e_priv *priv, u32 obj_id);
 #else
 
 static inline void mlx5e_ipsec_build_inverse_table(void)
@@ -144,6 +145,10 @@ static inline void mlx5e_ipsec_build_netdev(struct mlx5e_priv *priv)
 {
 }
 
+static inline int mlx5e_ipsec_async_event(struct mlx5e_priv *priv, u32 obj_id)
+{
+	return NOTIFY_DONE;
+}
 #endif
 
 #endif	/* __MLX5E_IPSEC_H__ */

@@ -112,6 +112,8 @@ struct mlx5_ipsec_obj_attrs {
 	u32 esn_msb;
 	u32 enc_key_id;
 	u32 flags;
+	__u64 soft_packet_limit;
+	__u64 hard_packet_limit;
 };
 
 static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
@@ -172,9 +174,24 @@ static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
 	MLX5_SET(ipsec_aso, aso_ctx, valid, 1);
 	MLX5_SET(ipsec_aso, aso_ctx, mode, MLX5_IPSEC_ASO_INC_SN);
 
+	/* hard and soft packet limit */
+	if (attrs->soft_packet_limit != 0xFFFFFFFFFFFFFFFF) {
+		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_soft_lft, (u32)attrs->soft_packet_limit);
+		MLX5_SET(ipsec_aso, aso_ctx, soft_lft_arm, 1);
+		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_enable, 1);
+	}
+
+	if (attrs->hard_packet_limit != 0xFFFFFFFFFFFFFFFF) {
+		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_pkt_cnt, (u32)attrs->hard_packet_limit);
+		MLX5_SET(ipsec_aso, aso_ctx, hard_lft_arm, 1);
+		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_enable, 1);
+	}
+
 	err = mlx5_cmd_exec(mdev, in, sizeof(in), out, sizeof(out));
 	if (!err)
 		*ipsec_id = MLX5_GET(general_obj_out_cmd_hdr, out, obj_id);
+
+	printk("ipsec_id=0x%x\n", *ipsec_id);
 
 	return err;
 }
@@ -280,6 +297,8 @@ void *mlx5_ipsec_create_sa_ctx(struct mlx5_core_dev *mdev,
 	ipsec_attrs.accel_flags = accel_xfrm->attrs.flags;
 	ipsec_attrs.esn_msb = htonl(accel_xfrm->attrs.esn);
 	ipsec_attrs.enc_key_id = sa_ctx->enc_key_id;
+	ipsec_attrs.soft_packet_limit = accel_xfrm->attrs.soft_packet_limit;
+	ipsec_attrs.hard_packet_limit = accel_xfrm->attrs.hard_packet_limit;
 	err = mlx5_create_ipsec_obj(mdev, &ipsec_attrs,
 				    &sa_ctx->ipsec_obj_id);
 	if (err) {

@@ -44,6 +44,7 @@
 #include "en/aso.h"
 
 #define MLX5E_IPSEC_SADB_RX_BITS 10
+#define MLX5E_IPSEC_SADB_TX_BITS 10
 #define MLX5E_IPSEC_ESN_SCOPE_MID 0x80000000L
 
 struct mlx5e_priv;
@@ -79,8 +80,10 @@ struct mlx5e_ipsec_stats {
 struct mlx5e_ipsec {
 	struct mlx5e_priv *en_priv;
 	DECLARE_HASHTABLE(sadb_rx, MLX5E_IPSEC_SADB_RX_BITS);
+	DECLARE_HASHTABLE(sadb_tx, MLX5E_IPSEC_SADB_TX_BITS);
 	bool no_trailer;
 	spinlock_t sadb_rx_lock; /* Protects sadb_rx and halloc */
+	spinlock_t sadb_tx_lock; /* Protects sadb_tx and halloc */
 	struct ida halloc;
 	struct mlx5e_ipsec_sw_stats sw_stats;
 	struct mlx5e_ipsec_stats stats;

@@ -806,8 +806,6 @@ static int mlxbf_gige_open(struct net_device *netdev)
 	u64 int_en;
 	int err;
 
-	memset(&priv->stats, 0, sizeof(priv->stats));
-
 	mlxbf_gige_rx_init(priv);
 	mlxbf_gige_tx_init(priv);
 	netif_napi_add(netdev, &priv->napi, mlxbf_gige_poll, NAPI_POLL_WEIGHT);
@@ -846,9 +844,12 @@ static void mlxbf_gige_clean_port(struct mlxbf_gige *priv)
 
 	/* Cache stats that will be cleared by clean port operation */
 	p = &priv->stats;
-	p->rx_din_dropped_pkts = readq(priv->base + MLXBF_GIGE_RX_DIN_DROP_COUNTER);
-	p->rx_filter_passed_pkts = readq(priv->base + MLXBF_GIGE_RX_PASS_COUNTER_ALL);
-	p->rx_filter_discard_pkts = readq(priv->base + MLXBF_GIGE_RX_DISC_COUNTER_ALL);
+	p->rx_din_dropped_pkts += readq(priv->base +
+					MLXBF_GIGE_RX_DIN_DROP_COUNTER);
+	p->rx_filter_passed_pkts += readq(priv->base +
+					  MLXBF_GIGE_RX_PASS_COUNTER_ALL);
+	p->rx_filter_discard_pkts += readq(priv->base +
+					   MLXBF_GIGE_RX_DISC_COUNTER_ALL);
 
 	/* Set the CLEAN_PORT_EN bit to trigger SW reset */
 	control = readq(priv->base + MLXBF_GIGE_CONTROL);
@@ -1218,5 +1219,5 @@ module_platform_driver(mlxbf_gige_driver);
 MODULE_DESCRIPTION("Mellanox BlueField SoC Gigabit Ethernet Driver");
 MODULE_AUTHOR("David Thompson <dthompson@mellanox.com>");
 MODULE_AUTHOR("Asmaa Mnebhi <asmaa@mellanox.com>");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(DRV_VERSION);

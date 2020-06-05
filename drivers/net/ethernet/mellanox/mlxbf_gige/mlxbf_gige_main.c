@@ -799,6 +799,48 @@ static void mlxbf_gige_free_irqs(struct mlxbf_gige *priv)
 	devm_free_irq(priv->dev, priv->llu_plu_irq, priv);
 }
 
+static void mlxbf_gige_cache_stats(struct mlxbf_gige *priv)
+{
+	struct mlxbf_gige_stats *p;
+
+	/* Cache stats that will be cleared by clean port operation */
+	p = &priv->stats;
+	p->rx_din_dropped_pkts += readq(priv->base +
+					MLXBF_GIGE_RX_DIN_DROP_COUNTER);
+	p->rx_filter_passed_pkts += readq(priv->base +
+					  MLXBF_GIGE_RX_PASS_COUNTER_ALL);
+	p->rx_filter_discard_pkts += readq(priv->base +
+					   MLXBF_GIGE_RX_DISC_COUNTER_ALL);
+}
+
+static void mlxbf_gige_clean_port(struct mlxbf_gige *priv)
+{
+	u64 control, status;
+	int cnt;
+
+	/* Set the CLEAN_PORT_EN bit to trigger SW reset */
+	control = readq(priv->base + MLXBF_GIGE_CONTROL);
+	control |= MLXBF_GIGE_CONTROL_CLEAN_PORT_EN;
+	writeq(control, priv->base + MLXBF_GIGE_CONTROL);
+
+	/* Create memory barrier before reading status */
+	wmb();
+
+	/* Loop waiting for status ready bit to assert */
+	cnt = 1000;
+	do {
+		status = readq(priv->base + MLXBF_GIGE_STATUS);
+		if (status & MLXBF_GIGE_STATUS_READY)
+			break;
+		usleep_range(50, 100);
+	} while (--cnt > 0);
+
+	/* Clear the CLEAN_PORT_EN bit at end of this loop */
+	control = readq(priv->base + MLXBF_GIGE_CONTROL);
+	control &= ~MLXBF_GIGE_CONTROL_CLEAN_PORT_EN;
+	writeq(control, priv->base + MLXBF_GIGE_CONTROL);
+}
+
 static int mlxbf_gige_open(struct net_device *netdev)
 {
 	struct mlxbf_gige *priv = netdev_priv(netdev);
@@ -806,6 +848,8 @@ static int mlxbf_gige_open(struct net_device *netdev)
 	u64 int_en;
 	int err;
 
+	mlxbf_gige_cache_stats(priv);
+	mlxbf_gige_clean_port(priv);
 	mlxbf_gige_rx_init(priv);
 	mlxbf_gige_tx_init(priv);
 	netif_napi_add(netdev, &priv->napi, mlxbf_gige_poll, NAPI_POLL_WEIGHT);
@@ -836,44 +880,6 @@ static int mlxbf_gige_open(struct net_device *netdev)
 	return 0;
 }
 
-static void mlxbf_gige_clean_port(struct mlxbf_gige *priv)
-{
-	struct mlxbf_gige_stats *p;
-	u64 control, status;
-	int cnt;
-
-	/* Cache stats that will be cleared by clean port operation */
-	p = &priv->stats;
-	p->rx_din_dropped_pkts += readq(priv->base +
-					MLXBF_GIGE_RX_DIN_DROP_COUNTER);
-	p->rx_filter_passed_pkts += readq(priv->base +
-					  MLXBF_GIGE_RX_PASS_COUNTER_ALL);
-	p->rx_filter_discard_pkts += readq(priv->base +
-					   MLXBF_GIGE_RX_DISC_COUNTER_ALL);
-
-	/* Set the CLEAN_PORT_EN bit to trigger SW reset */
-	control = readq(priv->base + MLXBF_GIGE_CONTROL);
-	control |= MLXBF_GIGE_CONTROL_CLEAN_PORT_EN;
-	writeq(control, priv->base + MLXBF_GIGE_CONTROL);
-
-	/* Create memory barrier before reading status */
-	wmb();
-
-	/* Loop waiting for status ready bit to assert */
-	cnt = 1000;
-	do {
-		status = readq(priv->base + MLXBF_GIGE_STATUS);
-		if (status & MLXBF_GIGE_STATUS_READY)
-			break;
-		usleep_range(50, 100);
-	} while (--cnt > 0);
-
-	/* Clear the CLEAN_PORT_EN bit at end of this loop */
-	control = readq(priv->base + MLXBF_GIGE_CONTROL);
-	control &= ~MLXBF_GIGE_CONTROL_CLEAN_PORT_EN;
-	writeq(control, priv->base + MLXBF_GIGE_CONTROL);
-}
-
 static int mlxbf_gige_stop(struct net_device *netdev)
 {
 	struct mlxbf_gige *priv = netdev_priv(netdev);
@@ -889,6 +895,7 @@ static int mlxbf_gige_stop(struct net_device *netdev)
 
 	mlxbf_gige_rx_deinit(priv);
 	mlxbf_gige_tx_deinit(priv);
+	mlxbf_gige_cache_stats(priv);
 	mlxbf_gige_clean_port(priv);
 
 	return 0;
@@ -1181,7 +1188,6 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 	return 0;
 }
 
-/* Device remove function. */
 static int mlxbf_gige_remove(struct platform_device *pdev)
 {
 	struct mlxbf_gige *priv;
@@ -1199,6 +1205,16 @@ static int mlxbf_gige_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void mlxbf_gige_shutdown(struct platform_device *pdev)
+{
+	struct mlxbf_gige *priv;
+
+	priv = platform_get_drvdata(pdev);
+
+	writeq(0, priv->base + MLXBF_GIGE_INT_EN);
+	mlxbf_gige_clean_port(priv);
+}
+
 static const struct acpi_device_id mlxbf_gige_acpi_match[] = {
 	{ "MLNXBF17", 0 },
 	{},
@@ -1208,6 +1224,7 @@ MODULE_DEVICE_TABLE(acpi, mlxbf_gige_acpi_match);
 static struct platform_driver mlxbf_gige_driver = {
 	.probe = mlxbf_gige_probe,
 	.remove = mlxbf_gige_remove,
+	.shutdown = mlxbf_gige_shutdown,
 	.driver = {
 		.name = DRV_NAME,
 		.acpi_match_table = ACPI_PTR(mlxbf_gige_acpi_match),

@@ -18,7 +18,7 @@
 #include "mlxbf_gige_regs.h"
 
 #define DRV_NAME    "mlxbf_gige"
-#define DRV_VERSION "1.0"
+#define DRV_VERSION "1.1"
 
 static void mlxbf_gige_set_mac_rx_filter(struct mlxbf_gige *priv,
 					 unsigned int index, u64 dmac)
@@ -861,11 +861,6 @@ static int mlxbf_gige_open(struct net_device *netdev)
 		return err;
 
 	phy_start(phydev);
-	err = phy_start_aneg(phydev);
-	if (err < 0) {
-		netdev_err(netdev, "phy_start_aneg failure: 0x%x\n", err);
-		return err;
-	}
 
 	/* Set bits in INT_EN that we care about */
 	int_en = MLXBF_GIGE_INT_EN_HW_ACCESS_ERROR |

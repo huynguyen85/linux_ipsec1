@@ -378,10 +378,10 @@ int mlxbf_gige_mdio_probe(struct platform_device *pdev, struct mlxbf_gige *priv)
 
 	irq = platform_get_irq(pdev, MLXBF_GIGE_PHY_INT_N);
 	if (irq < 0) {
-		dev_err(dev, "Failed to retrieve irq\n");
+		dev_err(dev, "Failed to retrieve irq 0x%x\n", irq);
 		return -ENODEV;
 	}
-	priv->mdiobus->irq[phy_addr] = irq;
+	priv->mdiobus->irq[phy_addr] = PHY_POLL;
 
 	/* Auto probe PHY at the corresponding address */
 	priv->mdiobus->phy_mask = ~(1 << phy_addr);

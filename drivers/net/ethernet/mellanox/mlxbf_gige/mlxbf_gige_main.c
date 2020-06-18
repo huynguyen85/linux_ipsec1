@@ -616,13 +616,19 @@ static irqreturn_t mlxbf_gige_llu_plu_intr(int irq, void *dev_id)
  */
 static u16 mlxbf_gige_tx_buffs_avail(struct mlxbf_gige *priv)
 {
+	unsigned long flags;
 	u16 avail;
+
+	spin_lock_irqsave(&priv->lock, flags);
 
 	if (priv->prev_tx_ci == priv->tx_pi)
 		avail = priv->tx_q_entries - 1;
 	else
 		avail = (((priv->tx_q_entries + priv->prev_tx_ci - priv->tx_pi)
 			  % priv->tx_q_entries) - 1);
+
+	spin_unlock_irqrestore(&priv->lock, flags);
+
 	return avail;
 }
 
@@ -698,28 +704,29 @@ static bool mlxbf_gige_rx_packet(struct mlxbf_gige *priv, int *rx_pkts)
 		/* Packet is OK, increment stats */
 		netdev->stats.rx_packets++;
 		netdev->stats.rx_bytes += datalen;
+
+		skb = dev_alloc_skb(datalen);
+		if (!skb) {
+			netdev->stats.rx_dropped++;
+			return false;
+		}
+
+		memcpy(skb_put(skb, datalen), pktp, datalen);
+
+		skb->dev = netdev;
+		skb->protocol = eth_type_trans(skb, netdev);
+		skb->ip_summed = CHECKSUM_NONE; /* device did not checksum packet */
+
+		netif_receive_skb(skb);
 	} else if (rx_cqe & MLXBF_GIGE_RX_CQE_PKT_STATUS_MAC_ERR) {
 		priv->stats.rx_mac_errors++;
 	} else if (rx_cqe & MLXBF_GIGE_RX_CQE_PKT_STATUS_TRUNCATED) {
 		priv->stats.rx_truncate_errors++;
 	}
 
-	skb = dev_alloc_skb(datalen);
-	if (!skb) {
-		netdev->stats.rx_dropped++;
-		return false;
-	}
-
-	memcpy(skb_put(skb, datalen), pktp, datalen);
-
 	/* Let hardware know we've replenished one buffer */
 	writeq(rx_pi + 1, priv->base + MLXBF_GIGE_RX_WQE_PI);
 
-	skb->dev = netdev;
-	skb->protocol = eth_type_trans(skb, netdev);
-	skb->ip_summed = CHECKSUM_NONE; /* device did not checksum packet */
-
-	netif_receive_skb(skb);
 	(*rx_pkts)++;
 	rx_pi = readq(priv->base + MLXBF_GIGE_RX_WQE_PI);
 	rx_pi_rem = rx_pi % priv->rx_q_entries;

@@ -47,6 +47,7 @@
 #include "lib/fs_chains.h"
 #include "en_tc.h"
 #include "accel/ipsec_offload.h"
+#include "esw/ipsec.h"
 
 /* There are two match-all miss flows, one for unicast dst mac and
  * one for multicast.
@@ -1350,6 +1351,12 @@ static int esw_create_offloads_fdb_tables(struct mlx5_eswitch *esw)
 		goto fdb_chains_err;
 	}
 
+	err = mlx5_esw_ipsec_create(esw);
+	if (err) {
+		esw_warn(esw->dev, "Failed to create IPsec offloads FDB Tables err %d\n", err);
+		goto fdb_ipsec_rx_err;
+	}
+
 	/* create send-to-vport group */
 	MLX5_SET(create_flow_group_in, flow_group_in, match_criteria_enable,
 		 MLX5_MATCH_MISC_PARAMETERS);
@@ -1440,6 +1447,8 @@ miss_err:
 peer_miss_err:
 	mlx5_destroy_flow_group(esw->fdb_table.offloads.send_to_vport_grp);
 send_vport_err:
+	mlx5_esw_ipsec_destroy(esw);
+fdb_ipsec_rx_err:
 	esw_chains_destroy(esw, esw_chains(esw));
 fdb_chains_err:
 	mlx5_destroy_flow_table(esw->fdb_table.offloads.slow_fdb);
@@ -1464,6 +1473,7 @@ static void esw_destroy_offloads_fdb_tables(struct mlx5_eswitch *esw)
 		mlx5_destroy_flow_group(esw->fdb_table.offloads.peer_miss_grp);
 	mlx5_destroy_flow_group(esw->fdb_table.offloads.miss_grp);
 
+	mlx5_esw_ipsec_destroy(esw);
 	esw_chains_destroy(esw, esw_chains(esw));
 
 	mlx5_destroy_flow_table(esw->fdb_table.offloads.slow_fdb);

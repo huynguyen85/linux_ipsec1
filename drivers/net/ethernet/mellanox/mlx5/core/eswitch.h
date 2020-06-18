@@ -67,6 +67,8 @@
 #define esw_chains(esw) \
 	((esw)->fdb_table.offloads.esw_chains_priv)
 
+struct mlx5_esw_ipsec_priv;
+
 struct vport_ingress {
 	struct mlx5_flow_table *acl;
 	struct mlx5_flow_handle *allow_rule;
@@ -190,7 +192,7 @@ struct mlx5_eswitch_fdb {
 				/* Protects vports.table */
 				struct mutex lock;
 			} vports;
-
+			struct mlx5_esw_ipsec_priv *esw_ipsec_priv;
 		} offloads;
 	};
 	u32 flags;

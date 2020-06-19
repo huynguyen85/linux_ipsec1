@@ -50,6 +50,7 @@
 #include "lib/mlx5.h"
 #define CREATE_TRACE_POINTS
 #include "diag/en_rep_tracepoint.h"
+#include "en_accel/ipsec.h"
 
 #define MLX5E_REP_PARAMS_DEF_LOG_SQ_SIZE \
         max(0x7, MLX5E_PARAMS_MINIMUM_LOG_SQ_SIZE)
@@ -707,6 +708,7 @@ static void mlx5e_build_rep_netdev(struct net_device *netdev)
 		mlx5_query_mac_address(mdev, netdev->dev_addr);
 		netdev->ethtool_ops = &mlx5e_uplink_rep_ethtool_ops;
 		mlx5e_dcbnl_build_rep_netdev(netdev);
+		mlx5e_ipsec_build_netdev(priv);
 	} else {
 		netdev->netdev_ops = &mlx5e_netdev_ops_rep;
 		eth_hw_addr_random(netdev);
@@ -740,6 +742,7 @@ static int mlx5e_init_rep(struct mlx5_core_dev *mdev,
 			  void *ppriv)
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
+	struct mlx5e_rep_priv *rpriv;
 	int err;
 
 	err = mlx5e_netdev_init(netdev, priv, mdev, profile, ppriv);
@@ -749,6 +752,15 @@ static int mlx5e_init_rep(struct mlx5_core_dev *mdev,
 	priv->channels.params.num_channels = MLX5E_REP_PARAMS_DEF_NUM_CHANNELS;
 
 	mlx5e_build_rep_params(netdev);
+
+	rpriv = ppriv;
+	if (rpriv->rep->vport == MLX5_VPORT_UPLINK) {
+		err = mlx5e_ipsec_init(priv);
+		if (err)
+			mlx5_core_err(mdev, "uplink rep IPSec initialization failed, %d\n",
+				      err);
+	}
+
 	mlx5e_build_rep_netdev(netdev);
 
 	mlx5e_timestamp_init(priv);
@@ -758,6 +770,11 @@ static int mlx5e_init_rep(struct mlx5_core_dev *mdev,
 
 static void mlx5e_cleanup_rep(struct mlx5e_priv *priv)
 {
+	struct mlx5e_rep_priv *rpriv = priv->ppriv;
+
+	if (rpriv->rep->vport == MLX5_VPORT_UPLINK)
+		mlx5e_ipsec_cleanup(priv);
+
 	mlx5e_netdev_cleanup(priv->netdev, priv);
 }
 

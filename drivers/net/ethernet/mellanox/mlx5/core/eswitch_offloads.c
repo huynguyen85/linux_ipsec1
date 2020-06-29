@@ -2569,12 +2569,23 @@ int mlx5_devlink_eswitch_mode_set(struct devlink *devlink, u16 mode,
 	if (cur_mlx5_mode == mlx5_mode)
 		goto unlock;
 
+	if (!mlx5_esw_ipsec_try_hold(esw)) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Can't change mode when IPsec flows are configured");
+		err = -EOPNOTSUPP;
+		goto unlock;
+	}
+
 	if (mode == DEVLINK_ESWITCH_MODE_SWITCHDEV)
 		err = esw_offloads_start(esw, extack);
 	else if (mode == DEVLINK_ESWITCH_MODE_LEGACY)
 		err = esw_offloads_stop(esw, extack);
-	else
+	else {
 		err = -EINVAL;
+		goto unlock;
+	}
+
+	mlx5_esw_ipsec_release(esw);
 
 unlock:
 	mutex_unlock(&esw->mode_lock);

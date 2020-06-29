@@ -34,6 +34,8 @@
 #define esw_ipsec_tx_chk_counter(esw) (esw_ipsec_priv(esw)->tx_chk_rule_counter)
 #define esw_ipsec_tx_chk_drop_counter(esw) (esw_ipsec_priv(esw)->tx_chk_drop_rule_counter)
 
+#define esw_ipsec_refcnt(esw) (esw_ipsec_priv(esw)->refcnt)
+
 struct mlx5_esw_ipsec_priv {
 	/* Rx tables, groups and miss rules */
 	struct mlx5_flow_table *ipsec_fdb_crypto_rx;
@@ -59,6 +61,9 @@ struct mlx5_esw_ipsec_priv {
 	struct mlx5_flow_handle *ipsec_fdb_tx_chk_rule_drop;
 	struct mlx5_fc *tx_chk_rule_counter;
 	struct mlx5_fc *tx_chk_drop_rule_counter;
+
+	/* Flow tables refcount */
+	atomic_t refcnt;
 };
 
 static struct mlx5_flow_table *esw_ipsec_table_create(struct mlx5_flow_namespace *ns,
@@ -504,6 +509,20 @@ out:
 	return err;
 }
 
+int mlx5_esw_ipsec_get_refcnt(struct mlx5_eswitch *esw)
+{
+	if (esw && esw_ipsec_priv(esw) && !atomic_inc_unless_negative(&esw_ipsec_refcnt(esw)))
+		return -EOPNOTSUPP;
+
+	return 0;
+}
+
+void mlx5_esw_ipsec_put_refcnt(struct mlx5_eswitch *esw)
+{
+	if (esw && esw_ipsec_priv(esw))
+		atomic_dec(&esw_ipsec_refcnt(esw));
+}
+
 struct mlx5_flow_table *mlx5_esw_ipsec_get_table(struct mlx5_eswitch *esw, enum mlx5_esw_ipsec_table_type type)
 {
 	switch (type) {
@@ -517,6 +536,20 @@ struct mlx5_flow_table *mlx5_esw_ipsec_get_table(struct mlx5_eswitch *esw, enum 
 		return esw_ipsec_ft_tx_chk(esw);
 	default: return NULL;
 	}
+}
+
+bool mlx5_esw_ipsec_try_hold(struct mlx5_eswitch *esw)
+{
+	if (!esw || !esw_ipsec_priv(esw))
+		return true;
+
+	return atomic_dec_unless_positive(&esw_ipsec_refcnt(esw));
+}
+
+void mlx5_esw_ipsec_release(struct mlx5_eswitch *esw)
+{
+	if (esw && esw_ipsec_priv(esw))
+		atomic_set(&esw_ipsec_refcnt(esw), 0);
 }
 
 int mlx5_esw_ipsec_create(struct mlx5_eswitch *esw)
@@ -549,6 +582,7 @@ int mlx5_esw_ipsec_create(struct mlx5_eswitch *esw)
 		goto err_tx_create;
 	}
 
+	atomic_set(&esw_ipsec_refcnt(esw), 0);
 	return 0;
 
 err_tx_create:

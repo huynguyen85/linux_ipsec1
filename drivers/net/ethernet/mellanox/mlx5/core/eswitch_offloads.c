@@ -46,6 +46,7 @@
 #include "lib/eq.h"
 #include "lib/fs_chains.h"
 #include "en_tc.h"
+#include "accel/ipsec_offload.h"
 
 /* There are two match-all miss flows, one for unicast dst mac and
  * one for multicast.
@@ -2754,6 +2755,73 @@ mlx5_eswitch_vport_has_rep(const struct mlx5_eswitch *esw, u16 vport_num)
 		return false;
 
 	return true;
+}
+
+int mlx5_devlink_eswitch_ipsec_mode_set(struct devlink *devlink,
+					enum devlink_eswitch_ipsec_mode ipsec,
+					struct netlink_ext_ack *extack)
+{
+	struct mlx5_core_dev *dev = devlink_priv(devlink);
+	struct mlx5_eswitch *esw = dev->priv.eswitch;
+	int err = 0;
+
+	memset(extack, 0, sizeof(*extack));
+
+	esw = mlx5_devlink_eswitch_get(devlink);
+	if (IS_ERR(esw))
+		return PTR_ERR(esw);
+
+	mutex_lock(&esw->mode_lock);
+	err = eswitch_devlink_esw_mode_check(esw);
+	if (err)
+		goto unlock;
+
+	if (!(mlx5_accel_ipsec_device_caps(dev) & MLX5_ACCEL_IPSEC_CAP_FULL_OFFLOAD)) {
+		err = -EOPNOTSUPP;
+		goto unlock;
+	}
+
+	if (ipsec > DEVLINK_ESWITCH_IPSEC_MODE_FULL) {
+		err = -EOPNOTSUPP;
+		goto unlock;
+	}
+
+	if (esw->mode == MLX5_ESWITCH_OFFLOADS) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Can't change IPsec mode while in switchdev mode");
+		err = -EOPNOTSUPP;
+		goto unlock;
+	}
+
+	if (esw->offloads.ipsec == ipsec)
+		goto unlock;
+
+	esw->offloads.ipsec = ipsec;
+unlock:
+	mutex_unlock(&esw->mode_lock);
+	return err;
+}
+
+int mlx5_devlink_eswitch_ipsec_mode_get(struct devlink *devlink,
+					enum devlink_eswitch_ipsec_mode *ipsec)
+{
+	struct mlx5_core_dev *dev = devlink_priv(devlink);
+	struct mlx5_eswitch *esw = dev->priv.eswitch;
+	int err;
+
+	esw = mlx5_devlink_eswitch_get(devlink);
+	if (IS_ERR(esw))
+		return PTR_ERR(esw);
+
+	mutex_lock(&esw->mode_lock);
+	err = eswitch_devlink_esw_mode_check(esw);
+	if (err)
+		goto unlock;
+
+	*ipsec = esw->offloads.ipsec;
+unlock:
+	mutex_unlock(&esw->mode_lock);
+	return 0;
 }
 
 void mlx5_eswitch_register_vport_reps(struct mlx5_eswitch *esw,

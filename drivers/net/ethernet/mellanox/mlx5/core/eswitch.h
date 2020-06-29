@@ -217,6 +217,7 @@ struct mlx5_esw_offload {
 	u8 inline_mode;
 	atomic64_t num_flows;
 	enum devlink_eswitch_encap_mode encap;
+	enum devlink_eswitch_ipsec_mode ipsec;
 	struct ida vport_metadata_ida;
 	unsigned int host_number; /* ECPF supports one external host */
 };
@@ -431,6 +432,11 @@ int mlx5_devlink_eswitch_encap_mode_set(struct devlink *devlink,
 					struct netlink_ext_ack *extack);
 int mlx5_devlink_eswitch_encap_mode_get(struct devlink *devlink,
 					enum devlink_eswitch_encap_mode *encap);
+int mlx5_devlink_eswitch_ipsec_mode_set(struct devlink *devlink,
+					enum devlink_eswitch_ipsec_mode ipsec,
+					struct netlink_ext_ack *extack);
+int mlx5_devlink_eswitch_ipsec_mode_get(struct devlink *devlink,
+					enum devlink_eswitch_ipsec_mode *ipsec);
 int mlx5_devlink_port_function_hw_addr_get(struct devlink *devlink,
 					   struct devlink_port *port,
 					   u8 *hw_addr, int *hw_addr_len,

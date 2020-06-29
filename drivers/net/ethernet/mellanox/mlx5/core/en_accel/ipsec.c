@@ -422,7 +422,7 @@ static int mlx5e_xfrm_add_state(struct xfrm_state *x)
 		goto err_xfrm;
 	}
 
-	mlx5e_aso_query_ipsec_aso(priv, sa_handle);
+	mlx5e_aso_send_ipsec_aso(priv, sa_handle, NULL);
 
 	err = mlx5e_xfrm_add_rule(priv, sa_entry);
 	if (err)
@@ -680,9 +680,11 @@ static void _mlx5e_ipsec_async_event(struct work_struct *work)
 	struct mlx5e_ipsec_async_work *async_work = container_of(work, struct mlx5e_ipsec_async_work, work);
 	struct mlx5e_priv *priv = async_work->priv;
 	struct mlx5e_ipsec_aso *aso = &priv->ipsec->aso;
+	struct mlx5e_aso_ctrl_param param = {};
 	u32 obj_id = async_work->obj_id;
 	u32 remove_flow_pkt_cnt;
 	struct xfrm_state *xs;	
+	u32 *temp;
 
 	printk("_mlx5e_ipsec_async_event 001\n");
 
@@ -692,10 +694,24 @@ static void _mlx5e_ipsec_async_event(struct work_struct *work)
 
 	printk("_mlx5e_ipsec_async_event obj_id=0x%d, xs=%p\n", obj_id, xs);
 
-	if (mlx5e_aso_query_ipsec_aso(priv, obj_id))
+	mlx5e_aso_send_ipsec_aso(priv, obj_id, NULL);
+
+	param.data_mask_mode = ASO_DATA_MASK_MODE_BITWISE_64BIT;
+	param.condition_0_operand = ALWAYS_TRUE;
+	param.condition_1_operand = ALWAYS_TRUE;
+
+	/* Work around for 32bit and 64bit endianess */
+	param.data_offset = MLX5_IPSEC_ASO_REMOVE_FLOW_PKT_CNT_OFFSET;
+	temp = (u32*)aso->ctx + (param.data_offset * 2);
+
+	param.bitwise_data = (u64)((be32_to_cpu(*temp) | BIT(24)) << 32) | (xs->lft.hard_packet_limit + 2);
+	param.data_mask = (u64)(-1);
+	if (mlx5e_aso_send_ipsec_aso(priv, obj_id, &param))
 		return;
 
-	remove_flow_pkt_cnt = MLX5_GET(ipsec_aso, aso->ctx, remove_flow_soft_lft);
+	mlx5e_aso_send_ipsec_aso(priv, obj_id, NULL);
+
+	remove_flow_pkt_cnt = MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt);
 	printk("remove_flow_pkt_cnt=%d\n", remove_flow_pkt_cnt);
 
 	if (!remove_flow_pkt_cnt)

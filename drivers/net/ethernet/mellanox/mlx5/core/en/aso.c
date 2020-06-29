@@ -89,7 +89,8 @@ void mlx5e_aso_dereg_mr(struct mlx5e_priv *priv)
 static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 				       struct mlx5e_asosq *sq,
 				       struct mlx5e_aso_wqe *wqe,
-				       u32 ipsec_obj_id)
+				       u32 ipsec_obj_id,
+				       struct mlx5e_aso_ctrl_param *param)
 {
 	struct mlx5_wqe_ctrl_seg *cseg = &wqe->ctrl;
 	struct mlx5_wqe_aso_ctrl_seg *aso_ctrl = &wqe->aso_ctrl;
@@ -108,6 +109,19 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 	aso_ctrl->l_key = cpu_to_be32(aso->mkey.key);
 	//aso_ctrl->l_key = cpu_to_be32(0);
 
+	/* param */
+	if (param) {
+		aso_ctrl->data_mask_mode = param->data_mask_mode << 6;
+		aso_ctrl->condition_1_0_operand = param->condition_1_operand | param->condition_0_operand << 4;
+		aso_ctrl->condition_1_0_offset = param->condition_1_offset | param->condition_0_offset << 4;
+		aso_ctrl->data_offset_condition_operand = param->data_offset | param->condition_operand << 6;
+		aso_ctrl->condition_0_data = cpu_to_be32(param->condition_0_data);
+		aso_ctrl->condition_0_mask = cpu_to_be32(param->condition_0_mask);
+		aso_ctrl->condition_1_data = cpu_to_be32(param->condition_1_data);
+		aso_ctrl->condition_1_mask = cpu_to_be32(param->condition_1_mask);
+		aso_ctrl->bitwise_data = cpu_to_be64(param->bitwise_data);
+		aso_ctrl->data_mask = cpu_to_be64(param->data_mask);
+	}
 	printk("aso->dma_addr=0x%lx, aso_ctrl->va_l=0x%x, aso_ctrl->va_h=0x%x\n", aso->dma_addr, aso_ctrl->va_l, aso_ctrl->va_h);
 }
 
@@ -207,7 +221,8 @@ void mlx5e_fill_asosq_frag_edge(struct mlx5e_asosq *sq,  struct mlx5_wq_cyc *wq,
 	}
 }
 
-int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
+int mlx5e_aso_send_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id,
+			     struct mlx5e_aso_ctrl_param *param)
 {
 	struct mlx5e_ipsec_aso *aso = &priv->ipsec->aso;
 	//struct mlx5e_icosq *sq = &priv->channels.c[0]->icosq;
@@ -227,7 +242,7 @@ int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id)
 	}
 
 	aso_wqe = mlx5_wq_cyc_get_wqe(wq, pi);
-	mlx5e_build_aso_wqe(aso, sq, aso_wqe, ipsec_obj_id);
+	mlx5e_build_aso_wqe(aso, sq, aso_wqe, ipsec_obj_id, param);
 
 	sq->db.aso_wqe[pi].opcode = MLX5_OPCODE_ACCESS_ASO;
 	sq->pc += MLX5E_ASO_WQEBBS;

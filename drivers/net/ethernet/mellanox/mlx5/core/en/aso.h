@@ -60,9 +60,47 @@ struct mlx5e_ipsec_aso {
 	struct mlx5e_sq_param sq_param;
 };
 
+enum {
+	ALWAYS_FALSE = 0,
+	ALWAYS_TRUE,
+	EQUAL,
+	NOT_EQUAL,
+	GREATER_OR_EQUAL,
+	LESSER_OR_EQUAL,
+	LESSER,
+	GREATER,
+	CYCLIC_GREATER,
+	CYCLIC_LESSER,
+};
+
+enum {
+	ASO_DATA_MASK_MODE_BITWISE_64BIT = 0,
+	ASO_DATA_MASK_MODE_BYTEWISE_64BYTE,
+	ASO_DATA_MASK_MODE_CALCULATED_64BYTE,
+};
+
+#define MLX5_IPSEC_ASO_REMOVE_FLOW_PKT_CNT_OFFSET 0
+
+struct mlx5e_aso_ctrl_param {
+	u8	data_mask_mode;
+	u8	condition_0_operand;
+	u8      condition_1_operand;
+	u8	condition_0_offset;
+	u8      condition_1_offset;
+	u8	data_offset;
+	u8      condition_operand;
+	u32	condition_0_data;
+	u32	condition_0_mask;
+	u32	condition_1_data;
+	u32	condition_1_mask;
+	u64	bitwise_data;
+	u64	data_mask;
+};
+
 int mlx5e_aso_reg_mr(struct mlx5e_priv *priv);
 void mlx5e_aso_dereg_mr(struct mlx5e_priv *priv);
-int mlx5e_aso_query_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id);
+int mlx5e_aso_send_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id,
+			     struct mlx5e_aso_ctrl_param *param);
 void mlx5e_aso_setup(struct mlx5e_priv *priv, struct mlx5e_channel *c);
 void mlx5e_aso_cleanup(struct mlx5e_priv *priv);
 

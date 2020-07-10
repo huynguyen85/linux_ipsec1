@@ -719,6 +719,7 @@ static void _mlx5e_ipsec_async_event(struct work_struct *work)
 	else if (remove_flow_pkt_cnt <= xs->lft.soft_packet_limit)
 		xfrm_state_expire(xs, 0);
 
+	xfrm_state_put(xs);
 	kfree(async_work);
 }
 

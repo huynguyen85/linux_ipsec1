@@ -2294,7 +2294,7 @@ static int mlx5_ib_flow_action_create_packet_reformat_ctx(
 		return ret;
 
 	maction->flow_action_raw.pkt_reformat =
-		mlx5_packet_reformat_alloc(dev->mdev, prm_prt, len,
+		mlx5_packet_reformat_alloc(dev->mdev, prm_prt, 0, len,
 					   in, namespace);
 	if (IS_ERR(maction->flow_action_raw.pkt_reformat)) {
 		ret = PTR_ERR(maction->flow_action_raw.pkt_reformat);

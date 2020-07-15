@@ -109,6 +109,7 @@ static int mlx5_cmd_stub_delete_fte(struct mlx5_flow_root_namespace *ns,
 
 static int mlx5_cmd_stub_packet_reformat_alloc(struct mlx5_flow_root_namespace *ns,
 					       int reformat_type,
+					       int reformat_param_0,
 					       size_t size,
 					       void *reformat_data,
 					       enum mlx5_flow_namespace_type namespace,
@@ -683,6 +684,7 @@ int mlx5_cmd_fc_bulk_query(struct mlx5_core_dev *dev, u32 base_id, int bulk_len,
 
 static int mlx5_cmd_packet_reformat_alloc(struct mlx5_flow_root_namespace *ns,
 					  int reformat_type,
+					  int reformat_param_0,
 					  size_t size,
 					  void *reformat_data,
 					  enum mlx5_flow_namespace_type namespace,
@@ -726,6 +728,8 @@ static int mlx5_cmd_packet_reformat_alloc(struct mlx5_flow_root_namespace *ns,
 		 reformat_data_size, size);
 	MLX5_SET(packet_reformat_context_in, packet_reformat_context_in,
 		 reformat_type, reformat_type);
+	MLX5_SET(packet_reformat_context_in, packet_reformat_context_in,
+		 reformat_param_0, reformat_param_0);
 	memcpy(reformat, reformat_data, size);
 
 	err = mlx5_cmd_exec(dev, in, inlen, out, sizeof(out));

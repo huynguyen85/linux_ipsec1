@@ -81,6 +81,7 @@ struct mlx5_accel_esp_xfrm_attrs {
 	u32   tfc_pad;
 	u32   flags;
 	u32   sa_handle;
+	u32   aulen;
 	enum mlx5_accel_esp_replay replay_type;
 	union {
 		struct {

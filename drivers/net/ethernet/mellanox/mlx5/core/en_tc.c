@@ -1477,7 +1477,7 @@ void mlx5e_tc_encap_flows_add(struct mlx5e_priv *priv,
 	int err;
 
 	e->pkt_reformat = mlx5_packet_reformat_alloc(priv->mdev,
-						     e->reformat_type,
+						     e->reformat_type, 0,
 						     e->encap_size, e->encap_header,
 						     MLX5_FLOW_NAMESPACE_FDB);
 	if (IS_ERR(e->pkt_reformat)) {
@@ -3867,6 +3867,7 @@ static int mlx5e_attach_decap(struct mlx5e_priv *priv,
 
 	d->pkt_reformat = mlx5_packet_reformat_alloc(priv->mdev,
 						     MLX5_REFORMAT_TYPE_L3_TUNNEL_TO_L2,
+						     0,
 						     sizeof(parse_attr->eth),
 						     &parse_attr->eth,
 						     MLX5_FLOW_NAMESPACE_FDB);

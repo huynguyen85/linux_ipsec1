@@ -521,6 +521,7 @@ out_err:
 
 static int mlx5_cmd_dr_packet_reformat_alloc(struct mlx5_flow_root_namespace *ns,
 					     int reformat_type,
+					     int reformat_param_0,
 					     size_t size,
 					     void *reformat_data,
 					     enum mlx5_flow_namespace_type namespace,

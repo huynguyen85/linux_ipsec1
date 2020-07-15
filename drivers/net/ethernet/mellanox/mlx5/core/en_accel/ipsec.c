@@ -148,11 +148,11 @@ static void
 mlx5e_ipsec_build_accel_xfrm_attrs(struct mlx5e_ipsec_sa_entry *sa_entry,
 				   struct mlx5_accel_esp_xfrm_attrs *attrs)
 {
-	struct xfrm_state *x = sa_entry->x;
 	struct aes_gcm_keymat *aes_gcm = &attrs->keymat.aes_gcm;
+	unsigned int crypto_data_len, key_len;
+	struct xfrm_state *x = sa_entry->x;
 	struct aead_geniv_ctx *geniv_ctx;
 	struct crypto_aead *aead;
-	unsigned int crypto_data_len, key_len;
 	int ivsize;
 
 	memset(attrs, 0, sizeof(*attrs));
@@ -205,6 +205,9 @@ mlx5e_ipsec_build_accel_xfrm_attrs(struct mlx5e_ipsec_sa_entry *sa_entry,
 	memcpy(&attrs->saddr, x->props.saddr.a6, sizeof(attrs->saddr));
 	memcpy(&attrs->daddr, x->id.daddr.a6, sizeof(attrs->daddr));
 	attrs->is_ipv6 = (x->props.family != AF_INET);
+
+	/* authentication tag length */
+	attrs->aulen = crypto_aead_authsize(aead);
 }
 
 static inline int mlx5e_xfrm_validate_state(struct xfrm_state *x)

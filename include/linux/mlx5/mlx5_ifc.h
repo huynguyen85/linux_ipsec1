@@ -5684,9 +5684,10 @@ struct mlx5_ifc_query_eq_in_bits {
 };
 
 struct mlx5_ifc_packet_reformat_context_in_bits {
-	u8         reserved_at_0[0x5];
-	u8         reformat_type[0x3];
-	u8         reserved_at_8[0xe];
+	u8         reformat_type[0x8];
+	u8         reserved_at_8[0x4];
+	u8         reformat_param_0[0x4];
+	u8         reserved_at_10[0x6];
 	u8         reformat_data_size[0xa];
 
 	u8         reserved_at_20[0x10];

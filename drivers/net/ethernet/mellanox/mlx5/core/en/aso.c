@@ -242,6 +242,8 @@ int mlx5e_aso_send_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id,
 	}
 
 	aso_wqe = mlx5_wq_cyc_get_wqe(wq, pi);
+
+	/* read enable always set */
 	mlx5e_build_aso_wqe(aso, sq, aso_wqe, ipsec_obj_id, param);
 
 	sq->db.aso_wqe[pi].opcode = MLX5_OPCODE_ACCESS_ASO;
@@ -265,7 +267,7 @@ int mlx5e_aso_send_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id,
 	printk("MLX5_GET(ipsec_aso, aso_ctx, remove_flow_pkt_cnt)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt));
 	print_hex_dump(KERN_ERR, "ipsec_aso: ", DUMP_PREFIX_ADDRESS, 16, 1, aso->ctx, aso->size, false);
 
-	return 0;
+	return MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt);
 }
 
 void mlx5e_aso_build_cq_param(struct mlx5e_priv *priv,
@@ -279,14 +281,26 @@ void mlx5e_aso_build_cq_param(struct mlx5e_priv *priv,
 	param->cq_period_mode = DIM_CQ_PERIOD_MODE_START_FROM_EQE;
 }
 
+void mlx5e_build_sq_param_common_aso(struct mlx5e_priv *priv,
+				     struct mlx5e_sq_param *param)
+{
+	void *sqc = param->sqc;
+	void *wq = MLX5_ADDR_OF(sqc, sqc, wq);
+
+	MLX5_SET(wq, wq, log_wq_stride, ilog2(MLX5_SEND_WQE_BB));
+
+	//have own pd for aso.
+	MLX5_SET(wq, wq, pd, priv->ipsec->aso.pdn);
+	param->wq.buf_numa_node = dev_to_node(priv->mdev->device);
+}
+
 void mlx5e_build_asosq_param(struct mlx5e_priv *priv,
 			     struct mlx5e_sq_param *param)
 {
 	void *sqc = param->sqc;
 	void *wq = MLX5_ADDR_OF(sqc, sqc, wq);
 
-	// To do: have own pd for aso. priv->mdev->mlx5e_res.pdn
-	mlx5e_build_sq_param_common(priv, param);
+	mlx5e_build_sq_param_common_aso(priv, param);
 	MLX5_SET(wq, wq, log_wq_sz, MLX5E_PARAMS_MINIMUM_LOG_SQ_SIZE);
 }
 

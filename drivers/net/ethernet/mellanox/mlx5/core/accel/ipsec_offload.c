@@ -4,6 +4,7 @@
 #include "mlx5_core.h"
 #include "ipsec_offload.h"
 #include "lib/mlx5.h"
+#include "en_accel/ipsec.h"
 
 #define MLX5_IPSEC_DEV_BASIC_CAPS (MLX5_ACCEL_IPSEC_CAP_DEVICE | MLX5_ACCEL_IPSEC_CAP_IPV6 | \
 				   MLX5_ACCEL_IPSEC_CAP_LSO)
@@ -175,13 +176,13 @@ static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
 	MLX5_SET(ipsec_aso, aso_ctx, mode, MLX5_IPSEC_ASO_INC_SN);
 
 	/* hard and soft packet limit */
-	if (attrs->soft_packet_limit != 0xFFFFFFFFFFFFFFFF) {
+	if (attrs->soft_packet_limit != IPSEC_NO_LIMIT) {
 		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_soft_lft, (u32)attrs->soft_packet_limit);
 		MLX5_SET(ipsec_aso, aso_ctx, soft_lft_arm, 1);
 		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_enable, 1);
 	}
 
-	if (attrs->hard_packet_limit != 0xFFFFFFFFFFFFFFFF) {
+	if (attrs->hard_packet_limit != IPSEC_NO_LIMIT) {
 		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_pkt_cnt, (u32)attrs->hard_packet_limit);
 		MLX5_SET(ipsec_aso, aso_ctx, hard_lft_arm, 1);
 		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_enable, 1);

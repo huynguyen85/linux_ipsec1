@@ -2170,7 +2170,6 @@ void mlx5e_build_sq_param_common(struct mlx5e_priv *priv,
 
 	MLX5_SET(wq, wq, log_wq_stride, ilog2(MLX5_SEND_WQE_BB));
 	MLX5_SET(wq, wq, pd,            priv->mdev->mlx5e_res.pdn);
-
 	param->wq.buf_numa_node = dev_to_node(priv->mdev->device);
 }
 

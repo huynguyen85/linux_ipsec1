@@ -107,6 +107,17 @@ struct mlx5e_ipsec_rule {
 	struct mlx5_pkt_reformat * pkt_reformat;
 };
 
+#define IPSEC_NO_LIMIT 0xFFFFFFFFFFFFFFFF
+#define IPSEC_SW_LIMIT_BIT 2 /* 31 */
+#define IPSEC_HW_LIMIT BIT(IPSEC_SW_LIMIT_BIT + 1)
+#define IPSEC_SW_LIMIT BIT(IPSEC_SW_LIMIT_BIT)
+
+struct mlx5e_ipsec_state_lft {
+	u64 real_soft_pkt_limit;
+	u64 real_hard_pkt_limit;
+	u64 last_cnt; /* last remove_flow_pkt_cnt */
+};
+
 struct mlx5e_ipsec_sa_entry {
 	struct hlist_node hlist; /* Item in SADB_RX hashtable */
 	struct mlx5e_ipsec_esn_state esn_state;
@@ -118,6 +129,7 @@ struct mlx5e_ipsec_sa_entry {
 	void (*set_iv_op)(struct sk_buff *skb, struct xfrm_state *x,
 			  struct xfrm_offload *xo);
 	struct mlx5e_ipsec_rule ipsec_rule;
+	struct mlx5e_ipsec_state_lft lft;
 };
 
 void mlx5e_ipsec_build_inverse_table(void);

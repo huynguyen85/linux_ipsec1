@@ -196,6 +196,50 @@ static bool mlx5e_ipsec_update_esn_state(struct mlx5e_ipsec_sa_entry *sa_entry)
 }
 
 static void
+initialize_lifetime_limit(struct mlx5e_ipsec_sa_entry *sa_entry,
+			  struct mlx5_accel_esp_xfrm_attrs *attrs)
+{
+	struct xfrm_state *x = sa_entry->x;
+	u64 soft_limit, hard_limit;
+
+	printk("initialize_lifetime_limit 001\n");
+	printk("x->lft.soft_packet_limit=%d\n", x->lft.soft_packet_limit);
+	printk("x->lft.hard_packet_limit=%d\n", x->lft.hard_packet_limit);
+
+	hard_limit = x->lft.hard_packet_limit;
+	soft_limit = (x->lft.soft_packet_limit == IPSEC_NO_LIMIT) ? 0 : x->lft.soft_packet_limit;
+	if (!(x->xso.flags & XFRM_OFFLOAD_FULL) ||
+	    (hard_limit <= soft_limit) ||
+	    (hard_limit == IPSEC_NO_LIMIT)) {
+		attrs->soft_packet_limit = IPSEC_NO_LIMIT;
+		attrs->hard_packet_limit = IPSEC_NO_LIMIT;
+		return;
+	}
+
+	/* Save soft and hard limit for async event */
+	sa_entry->lft.real_soft_pkt_limit = soft_limit;
+	sa_entry->lft.real_hard_pkt_limit = hard_limit;
+
+	if (hard_limit >= IPSEC_HW_LIMIT && soft_limit >= IPSEC_HW_LIMIT) {
+		hard_limit = IPSEC_SW_LIMIT + hard_limit % IPSEC_SW_LIMIT;
+		soft_limit = IPSEC_SW_LIMIT;
+	} else if (hard_limit >= IPSEC_HW_LIMIT && soft_limit < IPSEC_HW_LIMIT) {
+		hard_limit = IPSEC_SW_LIMIT + hard_limit % IPSEC_SW_LIMIT;
+	}
+	
+	attrs->hard_packet_limit = hard_limit;
+	attrs->soft_packet_limit = soft_limit;
+	sa_entry->lft.last_cnt = hard_limit;
+
+	printk("attrs->hard_packet_limit =%d\n", attrs->hard_packet_limit);
+	printk("attrs->soft_packet_limit =%d\n", attrs->soft_packet_limit);
+	printk("sa_entry->lft.real_soft_pkt_limit =%d\n", sa_entry->lft.real_soft_pkt_limit);
+	printk("sa_entry->lft.real_hard_pkt_limit =%d\n", sa_entry->lft.real_hard_pkt_limit);
+	printk("sa_entry->lft.last_cnt =%d\n", sa_entry->lft.last_cnt);
+	printk("initialize_lifetime_limit 009\n");
+}				
+
+static void
 mlx5e_ipsec_build_accel_xfrm_attrs(struct mlx5e_ipsec_sa_entry *sa_entry,
 				   struct mlx5_accel_esp_xfrm_attrs *attrs)
 {
@@ -264,12 +308,8 @@ mlx5e_ipsec_build_accel_xfrm_attrs(struct mlx5e_ipsec_sa_entry *sa_entry,
 	/* netdev priv */
 	attrs->priv = netdev_priv(x->xso.dev);
 
-	/* full offload limit */
-	attrs->hard_packet_limit = x->lft.hard_packet_limit;
-	attrs->soft_packet_limit = x->lft.soft_packet_limit;
-
-	printk("attrs->hard_packet_limit =%d\n", attrs->hard_packet_limit);
-	printk("attrs->soft_packet_limit =%d\n", attrs->soft_packet_limit);
+	/* lifetime limit for full offload */
+	initialize_lifetime_limit(sa_entry, attrs);
 }
 
 static inline int mlx5e_xfrm_validate_state(struct xfrm_state *x)
@@ -448,7 +488,7 @@ static int mlx5e_xfrm_add_state(struct xfrm_state *x)
 	}
 
 	x->xso.offload_handle = (unsigned long)sa_entry;
-	DEBUG_FL("Out Success\n");
+	DEBUG_FL("Out Success priv->ipsec=%p\n", priv->ipsec);
 	goto out;
 
 err_add_rule:
@@ -675,51 +715,119 @@ void mlx5e_ipsec_build_netdev(struct mlx5e_priv *priv)
 	netdev->hw_enc_features |= NETIF_F_GSO_ESP;
 }
 
-static void _mlx5e_ipsec_async_event(struct work_struct *work)
+enum {
+	ARM_SOFT = BIT(0),
+	SET_SOFT = BIT(1),
+	SET_CNT_BIT31  = BIT(3),
+};
+
+#define UPPER32_MASK 0xFFFFFFFF00000000
+
+static u32 ipsec_aso_set(struct mlx5e_priv *priv, u32 obj_id, u8 flags, u32 comparator)
 {
-	struct mlx5e_ipsec_async_work *async_work = container_of(work, struct mlx5e_ipsec_async_work, work);
-	struct mlx5e_priv *priv = async_work->priv;
 	struct mlx5e_ipsec_aso *aso = &priv->ipsec->aso;
 	struct mlx5e_aso_ctrl_param param = {};
-	u32 obj_id = async_work->obj_id;
-	u32 remove_flow_pkt_cnt;
-	struct xfrm_state *xs;	
-	u32 *temp;
+	u32 pkt_cnt;
 
-	printk("_mlx5e_ipsec_async_event 001\n");
-
-	xs = mlx5e_ipsec_sadb_tx_lookup(priv->ipsec, obj_id);
-	if (!xs)
-		return;
-
-	printk("_mlx5e_ipsec_async_event obj_id=0x%d, xs=%p\n", obj_id, xs);
-
-	mlx5e_aso_send_ipsec_aso(priv, obj_id, NULL);
+	if (!flags) {
+		mlx5e_aso_send_ipsec_aso(priv, obj_id, NULL);
+		return MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt);
+	}
 
 	param.data_mask_mode = ASO_DATA_MASK_MODE_BITWISE_64BIT;
 	param.condition_0_operand = ALWAYS_TRUE;
 	param.condition_1_operand = ALWAYS_TRUE;
 
-	/* Work around for 32bit and 64bit endianess */
+	if (flags & SET_SOFT) {
+		param.data_offset = MLX5_IPSEC_ASO_REMOVE_FLOW_SOFT_LFT_OFFSET;
+		param.bitwise_data = (u64)(comparator) << 32;
+		param.data_mask = UPPER32_MASK;
+		pkt_cnt = mlx5e_aso_send_ipsec_aso(priv, obj_id, &param);
+		if (flags == SET_SOFT)
+			return pkt_cnt;
+	}
+
+	/* For ASO_WQE big Endian format,
+	 * ARM SOFT is BIT(25 + 32)
+	 * SET COUNTER BIT 31 is BIT(31)
+	 */
 	param.data_offset = MLX5_IPSEC_ASO_REMOVE_FLOW_PKT_CNT_OFFSET;
-	temp = (u32*)aso->ctx + (param.data_offset * 2);
+	//temp = (u64*)aso->ctx + param.data_offset;
+	param.bitwise_data = IPSEC_SW_LIMIT | BIT(25 + 32);
+	param.data_mask = IPSEC_SW_LIMIT | BIT(25 + 32);
+	pkt_cnt = mlx5e_aso_send_ipsec_aso(priv, obj_id, &param);
+	return pkt_cnt;
+}
 
-	param.bitwise_data = (u64)((be32_to_cpu(*temp) | BIT(24)) << 32) | (xs->lft.hard_packet_limit + 2);
-	param.data_mask = (u64)(-1);
-	if (mlx5e_aso_send_ipsec_aso(priv, obj_id, &param))
-		return;
+static void _mlx5e_ipsec_async_event(struct work_struct *work)
+{
+	struct mlx5e_ipsec_async_work *async_work = container_of(work, struct mlx5e_ipsec_async_work, work);
+	struct mlx5e_priv *priv = async_work->priv;
+	struct mlx5e_ipsec_sa_entry *sa_entry;
+	struct mlx5e_ipsec_state_lft *lft;
+	u32 obj_id = async_work->obj_id;
+	struct xfrm_state *xs;	
+	u32 pkt_cnt;
+	u8 flags;
 
-	mlx5e_aso_send_ipsec_aso(priv, obj_id, NULL);
+	printk("_mlx5e_ipsec_async_event 001 priv->ipsec=%p, obj_id=0x%x\n", priv->ipsec, obj_id);
 
-	remove_flow_pkt_cnt = MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt);
-	printk("remove_flow_pkt_cnt=%d\n", remove_flow_pkt_cnt);
+	xs = mlx5e_ipsec_sadb_tx_lookup(priv->ipsec, obj_id);
+	if (!xs)
+		goto out_async_work;
 
-	if (!remove_flow_pkt_cnt)
-		xfrm_state_expire(xs, 1);
-	else if (remove_flow_pkt_cnt <= xs->lft.soft_packet_limit)
-		xfrm_state_expire(xs, 0);
 
+	sa_entry = to_ipsec_sa_entry(xs);
+	if (!sa_entry)
+		goto out_xs;
+
+	lft = &sa_entry->lft;
+
+	//ipsec_aso_set(priv, obj_id, 0, 0);
+	printk("_mlx5e_ipsec_async_event obj_id=0x%d, xs=%p, real_soft=%d, real_hard=%d, lft->last_cnt=%d\n", obj_id, xs, lft->real_soft_pkt_limit, lft->real_hard_pkt_limit, lft->last_cnt);
+
+
+	if (lft->real_soft_pkt_limit < IPSEC_SW_LIMIT) {
+		if (lft->real_hard_pkt_limit < IPSEC_SW_LIMIT) {
+			pkt_cnt = ipsec_aso_set(priv, obj_id, 0, 0);
+			if (!pkt_cnt) {
+				xfrm_state_expire(xs, 1);
+				printk("Notify hard obj_id=0x%d, xs=%p\n", obj_id, xs);
+			} else {
+				xfrm_state_expire(xs, 0);
+				printk("Notify soft obj_id=0x%d, xs=%p\n", obj_id, xs);
+			}
+		} else {
+			/* check if need to set new packet limit */
+			if ((lft->real_hard_pkt_limit - (lft->last_cnt - lft->real_soft_pkt_limit)) > IPSEC_SW_LIMIT)
+				pkt_cnt = ipsec_aso_set(priv, obj_id,
+							ARM_SOFT | SET_SOFT | SET_CNT_BIT31,
+							lft->real_soft_pkt_limit);
+			else /* this is last soft event */ {
+				pkt_cnt = ipsec_aso_set(priv, obj_id, 0, 0);
+				xfrm_state_expire(xs, 0);
+				printk("Notify soft obj_id=0x%d, xs=%p\n", obj_id, xs);
+			}
+				
+			lft->real_hard_pkt_limit -= (lft->last_cnt - pkt_cnt);
+			lft->last_cnt = pkt_cnt | IPSEC_SW_LIMIT;
+			printk("pkt_cnt=%d, set soft to soft limit, set bit 32, new real_hard %d\n", pkt_cnt, lft->real_hard_pkt_limit);
+		}
+	} else {
+		pkt_cnt = ipsec_aso_set(priv, obj_id,
+					ARM_SOFT | SET_CNT_BIT31,
+					0);
+		lft->real_hard_pkt_limit -= (lft->last_cnt - pkt_cnt);
+		lft->real_soft_pkt_limit -= (lft->last_cnt - pkt_cnt);
+		lft->last_cnt = pkt_cnt;
+		printk("set bit 32, hard is set to %d, soft to %d\n", lft->real_hard_pkt_limit, lft->real_soft_pkt_limit);
+	}
+	printk("_mlx5e_ipsec_async_event 009\n");
+	ipsec_aso_set(priv, obj_id, 0, 0);
+
+out_xs:
 	xfrm_state_put(xs);
+out_async_work:
 	kfree(async_work);
 }
 

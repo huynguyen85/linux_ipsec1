@@ -2,7 +2,7 @@
 
 /* Gigabit Ethernet driver for Mellanox BlueField SoC
  *
- * Copyright (c) 2020, Mellanox Technologies
+ * Copyright (c) 2020 Mellanox Technologies Ltd.
  */
 
 #include <linux/acpi.h>
@@ -493,17 +493,15 @@ static int mlxbf_gige_get_link_ksettings(struct net_device *netdev,
 		    SUPPORTED_Autoneg | SUPPORTED_Pause;
 
 	advertising = ADVERTISED_1000baseT_Full | ADVERTISED_Autoneg |
-		     ADVERTISED_Pause;
+		      ADVERTISED_Pause;
 
 	status = phy_read(phydev, MII_LPA);
-	if (status >= 0) {
+	if (status >= 0)
 		lp_advertising = mii_lpa_to_ethtool_lpa_t(status & 0xffff);
-	}
 
 	status = phy_read(phydev, MII_STAT1000);
-	if (status >= 0) {
+	if (status >= 0)
 		lp_advertising |= mii_stat1000_to_ethtool_lpa_t(status & 0xffff);
-	}
 
 	ethtool_convert_legacy_u32_to_link_mode(link_ksettings->link_modes.supported,
 						supported);
@@ -516,7 +514,7 @@ static int mlxbf_gige_get_link_ksettings(struct net_device *netdev,
 	link_ksettings->base.speed = SPEED_1000;
 	link_ksettings->base.duplex = DUPLEX_FULL;
 	link_ksettings->base.port = PORT_TP;
-	link_ksettings->base.phy_address = MLXBF_GIGE_DEFAULT_PHY_ADDR;
+	link_ksettings->base.phy_address = MLXBF_GIGE_MDIO_DEFAULT_PHY_ADDR;
 	link_ksettings->base.transceiver = XCVR_INTERNAL;
 	link_ksettings->base.mdio_support = ETH_MDIO_SUPPORTS_C22;
 	link_ksettings->base.eth_tp_mdix = ETH_TP_MDI_INVALID;
@@ -679,8 +677,8 @@ static u16 mlxbf_gige_tx_buffs_avail(struct mlxbf_gige *priv)
 	if (priv->prev_tx_ci == priv->tx_pi)
 		avail = priv->tx_q_entries - 1;
 	else
-		avail = (((priv->tx_q_entries + priv->prev_tx_ci - priv->tx_pi)
-			  % priv->tx_q_entries) - 1);
+		avail = ((priv->tx_q_entries + priv->prev_tx_ci - priv->tx_pi)
+			  % priv->tx_q_entries) - 1;
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 
@@ -713,8 +711,8 @@ static bool mlxbf_gige_handle_tx_complete(struct mlxbf_gige *priv)
 		 * buffer address and the 8 LSB contain information
 		 * about the TX WQE.
 		 */
-		tx_wqe_addr = (priv->tx_wqe_base +
-			       (tx_wqe_index * MLXBF_GIGE_TX_WQE_SZ_QWORDS));
+		tx_wqe_addr = priv->tx_wqe_base +
+			       (tx_wqe_index * MLXBF_GIGE_TX_WQE_SZ_QWORDS);
 
 		stats->tx_packets++;
 		stats->tx_bytes += MLXBF_GIGE_TX_WQE_PKT_LEN(tx_wqe_addr);
@@ -884,9 +882,6 @@ static void mlxbf_gige_clean_port(struct mlxbf_gige *priv)
 	control = readq(priv->base + MLXBF_GIGE_CONTROL);
 	control |= MLXBF_GIGE_CONTROL_CLEAN_PORT_EN;
 	writeq(control, priv->base + MLXBF_GIGE_CONTROL);
-
-	/* Create memory barrier before reading status */
-	wmb();
 
 	/* Loop waiting for status ready bit to assert */
 	cnt = 1000;

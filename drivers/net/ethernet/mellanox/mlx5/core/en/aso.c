@@ -122,7 +122,7 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 		aso_ctrl->bitwise_data = cpu_to_be64(param->bitwise_data);
 		aso_ctrl->data_mask = cpu_to_be64(param->data_mask);
 	}
-	printk("aso->dma_addr=0x%lx, aso_ctrl->va_l=0x%x, aso_ctrl->va_h=0x%x\n", aso->dma_addr, aso_ctrl->va_l, aso_ctrl->va_h);
+	//printk("aso->dma_addr=0x%lx, aso_ctrl->va_l=0x%x, aso_ctrl->va_h=0x%x\n", aso->dma_addr, aso_ctrl->va_l, aso_ctrl->va_h);
 }
 
 void mlx5e_poll_aso_cq(struct mlx5e_cq *cq)
@@ -144,7 +144,7 @@ void mlx5e_poll_aso_cq(struct mlx5e_cq *cq)
 	 */
 	sqcc = sq->cc;
 
-	printk(KERN_ERR "sq->cc=0x%x\n", sq->cc);
+	//printk(KERN_ERR "sq->cc=0x%x\n", sq->cc);
 
 	i = 0;
 	do {
@@ -155,7 +155,7 @@ void mlx5e_poll_aso_cq(struct mlx5e_cq *cq)
 
 
 		wqe_counter = be16_to_cpu(cqe->wqe_counter);
-		printk(KERN_ERR "001, wqe_counter=0x%x\n", wqe_counter);
+		//printk(KERN_ERR "001, wqe_counter=0x%x\n", wqe_counter);
 
 		do {
 			struct mlx5e_sq_wqe_info *wi;
@@ -166,7 +166,7 @@ void mlx5e_poll_aso_cq(struct mlx5e_cq *cq)
 			ci = mlx5_wq_cyc_ctr2ix(&sq->wq, sqcc);
 			wi = &sq->db.aso_wqe[ci];
 
-			printk(KERN_ERR "002, sqcc=0x%x\n", sqcc);
+			//printk(KERN_ERR "002, sqcc=0x%x\n", sqcc);
 
 			if (last_wqe && unlikely(get_cqe_opcode(cqe) != MLX5_CQE_REQ)) {
 				netdev_WARN_ONCE(cq->channel->netdev,
@@ -174,7 +174,7 @@ void mlx5e_poll_aso_cq(struct mlx5e_cq *cq)
 						 get_cqe_opcode(cqe));
 				//if (!test_and_set_bit(MLX5E_SQ_STATE_RECOVERING, &sq->state))
 				//	queue_work(cq->channel->priv->wq, &sq->recover_work);
-				printk(KERN_ERR "003, sqcc=0x%x\n", sqcc);
+				//printk(KERN_ERR "003, sqcc=0x%x\n", sqcc);
 				break;
 			}
 
@@ -185,24 +185,24 @@ void mlx5e_poll_aso_cq(struct mlx5e_cq *cq)
 				sqcc++;
 			} else if (likely(wi->opcode == MLX5_OPCODE_ACCESS_ASO)) {
 				sqcc += MLX5E_ASO_WQEBBS;
-				printk("Huy ASO completion\n");
+				//printk("Huy ASO completion\n");
 			} else {
 				netdev_WARN_ONCE(cq->channel->netdev,
 						 "Bad OPCODE in ICOSQ WQE info: 0x%x\n",
 						 wi->opcode);
 			}
 
-			printk(KERN_ERR "003, sqcc=0x%x\n", sqcc);
+			//printk(KERN_ERR "003, sqcc=0x%x\n", sqcc);
 
 		} while (!last_wqe);
 
-		printk(KERN_ERR "004, sqcc=0x%x\n", sqcc);
+		//printk(KERN_ERR "004, sqcc=0x%x\n", sqcc);
 
 	} while ((++i < MLX5E_TX_CQ_POLL_BUDGET) && (cqe = mlx5_cqwq_get_cqe(&cq->wq)));
 
 	sq->cc = sqcc;
 
-	printk(KERN_ERR "004, sqcc=0x%x\n", sqcc);
+	//printk(KERN_ERR "004, sqcc=0x%x\n", sqcc);
 
 	mlx5_cqwq_update_db_record(&cq->wq);
 }
@@ -222,7 +222,8 @@ void mlx5e_fill_asosq_frag_edge(struct mlx5e_asosq *sq,  struct mlx5_wq_cyc *wq,
 }
 
 int mlx5e_aso_send_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id,
-			     struct mlx5e_aso_ctrl_param *param)
+			     struct mlx5e_aso_ctrl_param *param,
+			     u32 *hard_cnt, u32 *soft_cnt)
 {
 	struct mlx5e_ipsec_aso *aso = &priv->ipsec->aso;
 	//struct mlx5e_icosq *sq = &priv->channels.c[0]->icosq;
@@ -250,24 +251,27 @@ int mlx5e_aso_send_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id,
 	sq->pc += MLX5E_ASO_WQEBBS;
 	sq->doorbell_cseg = &aso_wqe->ctrl;
 
-	printk(KERN_ERR "mlx5e_aso_query_ipsec_aso 001 \n");
+	//printk(KERN_ERR "mlx5e_aso_query_ipsec_aso 001 \n");
 
 	mlx5e_notify_hw(&sq->wq, sq->pc, sq->uar_map, sq->doorbell_cseg);
 	sq->doorbell_cseg = NULL;
 
-	printk(KERN_ERR "mlx5e_aso_query_ipsec_aso 002 \n");
+	//printk(KERN_ERR "mlx5e_aso_query_ipsec_aso 002 \n");
 
 	//msleep(1);
 
-	printk(KERN_ERR "mlx5e_aso_query_ipsec_aso 003 \n");
+	//printk(KERN_ERR "mlx5e_aso_query_ipsec_aso 003 \n");
 	mlx5e_poll_aso_cq(&sq->cq);
 
 	printk("MLX5_GET(ipsec_aso, aso_ctx, mode)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, mode));
 	printk("MLX5_GET(ipsec_aso, aso_ctx, remove_flow_soft_lft)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, remove_flow_soft_lft));
 	printk("MLX5_GET(ipsec_aso, aso_ctx, remove_flow_pkt_cnt)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt));
-	print_hex_dump(KERN_ERR, "ipsec_aso: ", DUMP_PREFIX_ADDRESS, 16, 1, aso->ctx, aso->size, false);
+	//print_hex_dump(KERN_ERR, "ipsec_aso: ", DUMP_PREFIX_ADDRESS, 16, 1, aso->ctx, aso->size, false);
 
-	return MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt);
+	if (hard_cnt)
+		*hard_cnt = MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt);
+	if (soft_cnt)
+		*soft_cnt = MLX5_GET(ipsec_aso, aso->ctx, remove_flow_soft_lft);
 }
 
 void mlx5e_aso_build_cq_param(struct mlx5e_priv *priv,

@@ -103,7 +103,8 @@ struct mlx5e_aso_ctrl_param {
 int mlx5e_aso_reg_mr(struct mlx5e_priv *priv);
 void mlx5e_aso_dereg_mr(struct mlx5e_priv *priv);
 int mlx5e_aso_send_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id,
-			     struct mlx5e_aso_ctrl_param *param);
+			     struct mlx5e_aso_ctrl_param *param,
+			     u32 *hard_cnt, u32 *soft_cnt);
 void mlx5e_aso_setup(struct mlx5e_priv *priv, struct mlx5e_channel *c);
 void mlx5e_aso_cleanup(struct mlx5e_priv *priv);
 

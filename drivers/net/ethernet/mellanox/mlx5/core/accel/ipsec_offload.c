@@ -176,7 +176,8 @@ static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
 	MLX5_SET(ipsec_aso, aso_ctx, mode, MLX5_IPSEC_ASO_INC_SN);
 
 	/* hard and soft packet limit */
-	if (attrs->soft_packet_limit != IPSEC_NO_LIMIT) {
+	if ((attrs->soft_packet_limit != IPSEC_NO_LIMIT) &&
+	    (attrs->hard_packet_limit != attrs->soft_packet_limit)) {
 		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_soft_lft, (u32)attrs->soft_packet_limit);
 		MLX5_SET(ipsec_aso, aso_ctx, soft_lft_arm, 1);
 		MLX5_SET(ipsec_aso, aso_ctx, remove_flow_enable, 1);

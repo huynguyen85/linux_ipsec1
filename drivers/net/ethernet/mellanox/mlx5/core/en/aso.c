@@ -232,8 +232,6 @@ int mlx5e_aso_send_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id,
 	struct mlx5e_aso_wqe *aso_wqe;
 	u16 pi, contig_wqebbs_room;
 
-	printk("mlx5e_aso_query_ipsec_aso\n");
-
 	pi = mlx5_wq_cyc_ctr2ix(wq, sq->pc);
 	contig_wqebbs_room = mlx5_wq_cyc_get_contig_wqebbs(wq, pi);
 	
@@ -251,22 +249,15 @@ int mlx5e_aso_send_ipsec_aso(struct mlx5e_priv *priv, u32 ipsec_obj_id,
 	sq->pc += MLX5E_ASO_WQEBBS;
 	sq->doorbell_cseg = &aso_wqe->ctrl;
 
-	//printk(KERN_ERR "mlx5e_aso_query_ipsec_aso 001 \n");
-
 	mlx5e_notify_hw(&sq->wq, sq->pc, sq->uar_map, sq->doorbell_cseg);
 	sq->doorbell_cseg = NULL;
 
-	//printk(KERN_ERR "mlx5e_aso_query_ipsec_aso 002 \n");
-
-	//msleep(1);
-
-	//printk(KERN_ERR "mlx5e_aso_query_ipsec_aso 003 \n");
 	mlx5e_poll_aso_cq(&sq->cq);
 
-	printk("MLX5_GET(ipsec_aso, aso_ctx, mode)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, mode));
+	//printk("MLX5_GET(ipsec_aso, aso_ctx, mode)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, mode));
 	printk("MLX5_GET(ipsec_aso, aso_ctx, remove_flow_soft_lft)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, remove_flow_soft_lft));
 	printk("MLX5_GET(ipsec_aso, aso_ctx, remove_flow_pkt_cnt)=0x%x\n", MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt));
-	//print_hex_dump(KERN_ERR, "ipsec_aso: ", DUMP_PREFIX_ADDRESS, 16, 1, aso->ctx, aso->size, false);
+	print_hex_dump(KERN_ERR, "ipsec_aso: ", DUMP_PREFIX_ADDRESS, 16, 1, aso->ctx, aso->size, false);
 
 	if (hard_cnt)
 		*hard_cnt = MLX5_GET(ipsec_aso, aso->ctx, remove_flow_pkt_cnt);

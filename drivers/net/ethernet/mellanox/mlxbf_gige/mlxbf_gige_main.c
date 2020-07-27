@@ -938,6 +938,12 @@ static netdev_tx_t mlxbf_gige_start_xmit(struct sk_buff *skb,
 		/* TX ring is full, inform stack but do not free SKB */
 		netif_stop_queue(netdev);
 		netdev->stats.tx_dropped++;
+		/* Since there is no separate "TX complete" interrupt, need
+		 * to explicitly schedule NAPI poll.  This will trigger logic
+		 * which processes TX completions, and will hopefully drain
+		 * the TX ring allowing the TX queue to be awakened.
+		 */
+		napi_schedule(&priv->napi);
 		return NETDEV_TX_BUSY;
 	}
 

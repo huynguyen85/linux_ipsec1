@@ -1124,13 +1124,6 @@ static int mlxbf_pmc_probe(struct platform_device *pdev)
 
 	ret = device_property_read_string_array(dev, "block_name",
 		pmc->block_name, pmc->total_blocks);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)
-	if (ret) {
-		dev_err(dev, "Reading block names failed\n");
-		err = ret;
-		goto error;
-	}
-#else
 	if (ret != pmc->total_blocks) {
 		dev_err(dev,
 			"Block count mismatch. Expected %d Returned %d\n",
@@ -1138,7 +1131,6 @@ static int mlxbf_pmc_probe(struct platform_device *pdev)
 		err = -EFAULT;
 		goto error;
 	}
-#endif
 
 	if (device_property_read_u32(dev, "tile_num", &pmc->tile_count)) {
 		dev_err(dev, "Number of tiles undefined\n");

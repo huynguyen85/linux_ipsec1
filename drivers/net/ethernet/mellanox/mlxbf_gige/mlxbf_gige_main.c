@@ -522,9 +522,8 @@ static irqreturn_t mlxbf_gige_error_intr(int irq, void *dev_id)
 
 	int_status = readq(priv->base + MLXBF_GIGE_INT_STATUS);
 
-	if (int_status & MLXBF_GIGE_INT_STATUS_HW_ACCESS_ERROR) {
+	if (int_status & MLXBF_GIGE_INT_STATUS_HW_ACCESS_ERROR)
 		priv->stats.hw_access_errors++;
-	}
 
 	if (int_status & MLXBF_GIGE_INT_STATUS_TX_CHECKSUM_INPUTS) {
 		priv->stats.tx_invalid_checksums++;
@@ -549,17 +548,14 @@ static irqreturn_t mlxbf_gige_error_intr(int irq, void *dev_id)
 		 */
 	}
 
-	if (int_status & MLXBF_GIGE_INT_STATUS_TX_PI_CI_EXCEED_WQ_SIZE) {
+	if (int_status & MLXBF_GIGE_INT_STATUS_TX_PI_CI_EXCEED_WQ_SIZE)
 		priv->stats.tx_index_errors++;
-	}
 
-	if (int_status & MLXBF_GIGE_INT_STATUS_SW_CONFIG_ERROR) {
+	if (int_status & MLXBF_GIGE_INT_STATUS_SW_CONFIG_ERROR)
 		priv->stats.sw_config_errors++;
-	}
 
-	if (int_status & MLXBF_GIGE_INT_STATUS_SW_ACCESS_ERROR) {
+	if (int_status & MLXBF_GIGE_INT_STATUS_SW_ACCESS_ERROR)
 		priv->stats.sw_access_errors++;
-	}
 
 	/* Clear all error interrupts by writing '1' back to
 	 * all the asserted bits in INT_STATUS.  Do not write
@@ -1017,13 +1013,12 @@ static void mlxbf_gige_set_rx_mode(struct net_device *netdev)
 	if (new_promisc_enabled != priv->promisc_enabled) {
 		priv->promisc_enabled = new_promisc_enabled;
 
-		if (new_promisc_enabled) {
+		if (new_promisc_enabled)
 			mlxbf_gige_enable_promisc(priv);
-		} else {
+		else
 			mlxbf_gige_disable_promisc(priv);
 		}
 	}
-}
 
 static const struct net_device_ops mlxbf_gige_netdev_ops = {
 	.ndo_open		= mlxbf_gige_open,
@@ -1125,9 +1120,8 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 	writeq(control, base + MLXBF_GIGE_CONTROL);
 
 	netdev = devm_alloc_etherdev(&pdev->dev, sizeof(*priv));
-	if (!netdev) {
+	if (!netdev)
 		return -ENOMEM;
-	}
 
 	SET_NETDEV_DEV(netdev, &pdev->dev);
 	netdev->netdev_ops = &mlxbf_gige_netdev_ops;
@@ -1206,16 +1200,11 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 
 static int mlxbf_gige_remove(struct platform_device *pdev)
 {
-	struct mlxbf_gige *priv;
-
-	priv = platform_get_drvdata(pdev);
+	struct mlxbf_gige *priv = platform_get_drvdata(pdev);
 
 	phy_disconnect(priv->netdev->phydev);
-
 	unregister_netdev(priv->netdev);
-
 	mlxbf_gige_mdio_remove(priv);
-
 	platform_set_drvdata(pdev, NULL);
 
 	return 0;
@@ -1223,9 +1212,7 @@ static int mlxbf_gige_remove(struct platform_device *pdev)
 
 static void mlxbf_gige_shutdown(struct platform_device *pdev)
 {
-	struct mlxbf_gige *priv;
-
-	priv = platform_get_drvdata(pdev);
+	struct mlxbf_gige *priv = platform_get_drvdata(pdev);
 
 	writeq(0, priv->base + MLXBF_GIGE_INT_EN);
 	mlxbf_gige_clean_port(priv);

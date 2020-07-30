@@ -212,7 +212,8 @@ static void
 initialize_lifetime_limit(struct mlx5e_ipsec_sa_entry *sa_entry,
 			  struct mlx5_accel_esp_xfrm_attrs *attrs)
 {
-	u64 soft_limit, hard_limit, hard_limit_modulo;
+	u64 soft_limit, hard_limit, real_soft, real_hard;
+	struct mlx5e_ipsec_state_lft *lft = &sa_entry->lft;
 	struct xfrm_state *x = sa_entry->x;
 	struct net_device *netdev;
 	struct mlx5e_priv *priv;
@@ -238,27 +239,43 @@ initialize_lifetime_limit(struct mlx5e_ipsec_sa_entry *sa_entry,
 	}
 
 	/* Save soft and hard limit for async event */
-	sa_entry->lft.real_soft_pkt_limit = soft_limit;
-	sa_entry->lft.real_hard_pkt_limit = hard_limit;
+	real_soft = soft_limit ? hard_limit - soft_limit : 0;
+	real_hard = hard_limit;
 
-	if (hard_limit >= IPSEC_HW_LIMIT) {
-		hard_limit_modulo = hard_limit & (IPSEC_SW_LIMIT - 1);
-		hard_limit = IPSEC_SW_LIMIT + hard_limit_modulo;
-
-		if (soft_limit >= IPSEC_HW_LIMIT) {
-			soft_limit = IPSEC_SW_LIMIT;
-		}
+	if (real_hard < IPSEC_HW_LIMIT) {
+		lft->round_soft = real_soft ? 1 : 0;
+		lft->is_simulated = false;
+		goto set_fw_attrs;
 	}
 
+	lft->is_simulated = true;
+	lft->round_soft = real_soft >> IPSEC_SW_LIMIT_BIT;
+	lft->round_hard = real_hard >> IPSEC_SW_LIMIT_BIT;
+	lft->mod_soft = real_soft & IPSEC_SW_MASK;
+	lft->mod_hard = real_hard & IPSEC_SW_MASK;
+
+	if (lft->mod_hard) { /* One extra round */
+		lft->round_hard++;
+		lft->round_soft++;
+	}
+
+	hard_limit = IPSEC_SW_LIMIT + lft->mod_hard;
+	soft_limit = IPSEC_SW_LIMIT;
+	if (lft->round_soft == 1)
+		printk("set soft too close to hard\n");
+
+set_fw_attrs:
 	attrs->hard_packet_limit = hard_limit;
 	attrs->soft_packet_limit = soft_limit;
-	sa_entry->lft.last_cnt = hard_limit;
 
 	printk("attrs->hard_packet_limit =%d\n", attrs->hard_packet_limit);
 	printk("attrs->soft_packet_limit =%d\n", attrs->soft_packet_limit);
-	printk("sa_entry->lft.real_soft_pkt_limit =%d\n", sa_entry->lft.real_soft_pkt_limit);
-	printk("sa_entry->lft.real_hard_pkt_limit =%d\n", sa_entry->lft.real_hard_pkt_limit);
-	printk("sa_entry->lft.last_cnt =%d\n", sa_entry->lft.last_cnt);
+	printk("real_soft =%d\n", real_soft);
+	printk("real_hard =%d\n", real_hard);
+	printk("lft.round_soft =%d\n", lft->round_soft);
+	printk("lft.round_hard =%d\n", lft->round_hard);
+	printk("lft.mod_soft =%d\n", lft->mod_soft);
+	printk("lft.mod_hard =%d\n", lft->mod_hard);
 	printk("initialize_lifetime_limit 009\n");
 }				
 
@@ -799,67 +816,7 @@ static void ipsec_aso_set(struct mlx5e_priv *priv, u32 obj_id, u8 flags,
 	mlx5e_aso_send_ipsec_aso(priv, obj_id, &param, hard_cnt, soft_cnt);
 }
 
-/*
-static void _mlx5e_ipsec_check_initial_traffic(struct work_struct *work)
-{
-	struct mlx5e_ipsec_async_work *async_work;
-	struct mlx5e_ipsec_sa_entry *sa_entry;
-	struct mlx5e_ipsec_state_lft *lft;
-	struct delayed_work *dwork;
-	struct mlx5e_priv *priv;
-	u32 hard_cnt, soft_cnt;
-	struct xfrm_state *xs;
-	u32 obj_id;
-
-	dwork = to_delayed_work(work);
-	async_work = container_of(dwork, struct mlx5e_ipsec_async_work, dwork);
-	priv = async_work->priv;
-	obj_id = async_work->obj_id;
-
-	xs = mlx5e_ipsec_sadb_tx_lookup(priv->ipsec, obj_id);
-	if (!xs)
-		goto out_async_work;
-
-	sa_entry = to_ipsec_sa_entry(xs);
-	if (!sa_entry)
-		goto out_xs;
-
-	lft = &sa_entry->lft;
-
-	//ipsec_aso_set(priv, obj_id, 0, 0);
-	mlx5_core_err(priv->mdev, "_mlx5e_ipsec_check_initial_traffic 001 priv->ipsec=%p, obj_id=0x%x, async_work->retry=%d\n", priv->ipsec, obj_id, async_work->retry);
-	mlx5_core_err(priv->mdev, "_mlx5e_ipsec_check_initial_traffic obj_id=0x%d, xs=%p, real_soft=%d, real_hard=%d, lft->last_cnt=%d\n", obj_id, xs, lft->real_soft_pkt_limit, lft->real_hard_pkt_limit, lft->last_cnt);
-
-	ipsec_aso_set(priv, obj_id, 0, 0, &hard_cnt, &soft_cnt);
-	if (hard_cnt == lft->last_cnt && !soft_cnt) {
-		struct mlx5e_ipsec_async_work *retry_work;
-
-		retry_work = kzalloc(sizeof(*retry_work), GFP_ATOMIC);
-		if (!retry_work)
-			xfrm_state_expire(xs, 1);
-		retry_work->priv = priv;
-		retry_work->obj_id = obj_id;
-		if (async_work->retry == 1)
-			goto out_xs;
-
-		retry_work->retry = async_work->retry > 1 ? async_work->retry - 1 : NO_TRAFFIC_RETRY;
-
-		INIT_DELAYED_WORK(&retry_work->dwork, _mlx5e_ipsec_async_event);
-		WARN_ON(!queue_delayed_work(priv->ipsec->wq, &retry_work->dwork, RETRY_SECOND));
-	}
-
-out_xs:
-	// read back remove later
-	ipsec_aso_set(priv, obj_id, 0, 0, &hard_cnt, &soft_cnt);
-
-	printk("_mlx5e_ipsec_async_event real_hard=%d, real_soft=%d 009\n",  lft->real_hard_pkt_limit, lft->real_soft_pkt_limit);
-	xfrm_state_put(xs);
-
-out_async_work:
-	kfree(async_work);
-}
-*/
-
+/* <0: no more soft, 1: notify soft, 2: 1 more soft, approximate soft if possible*/
 static void _mlx5e_ipsec_async_event(struct work_struct *work)
 {
 	struct mlx5e_ipsec_async_work *async_work;
@@ -867,10 +824,9 @@ static void _mlx5e_ipsec_async_event(struct work_struct *work)
 	struct mlx5e_ipsec_state_lft *lft;
 	struct delayed_work *dwork;
 	struct mlx5e_priv *priv;
-	u32 hard_cnt, soft_cnt;
+	u32 hard_cnt, soft_cnt, new_soft_cnt;
 	struct xfrm_state *xs;
 	u32 obj_id;
-	u64 prev_hard;
 
 	dwork = to_delayed_work(work);
 	async_work = container_of(dwork, struct mlx5e_ipsec_async_work, dwork);
@@ -883,71 +839,109 @@ static void _mlx5e_ipsec_async_event(struct work_struct *work)
 
 	sa_entry = to_ipsec_sa_entry(xs);
 	if (!sa_entry)
-		goto out_xs;
+		goto out_xs_state;
 
 	lft = &sa_entry->lft;
 
 	mlx5_core_err(priv->mdev, "_mlx5e_ipsec_async_event 001 priv->ipsec=%p, obj_id=0x%x, async_work->retry=%d\n", priv->ipsec, obj_id, async_work->retry);
-	mlx5_core_err(priv->mdev, "_mlx5e_ipsec_async_event obj_id=0x%d, xs=%p, real_soft=%d, real_hard=%d, lft->last_cnt=%d\n", obj_id, xs, lft->real_soft_pkt_limit, lft->real_hard_pkt_limit, lft->last_cnt);
-	prev_hard = lft->real_hard_pkt_limit;
+	mlx5_core_err(priv->mdev, "_mlx5e_ipsec_async_event obj_id=0x%d, xs=%p, round_soft=%d, round_hard=%d, mod_soft=%d, mod_hard=%d, is_simulated=%d\n", obj_id, xs, lft->round_soft, lft->round_hard, lft->mod_soft, lft->mod_hard, lft->is_simulated);
 
-	/* Check if this is last hard event */
+	/* Query */
 	ipsec_aso_set(priv, obj_id, 0, 0, &hard_cnt, &soft_cnt);
+	printk("After ipsec_aso_set read only\n");
+
 	if (!hard_cnt) {
 		xfrm_state_expire(xs, 1);
 		printk("Notify hard obj_id=0x%d, xs=%p\n", obj_id, xs);
-		goto out_xs;
+		lft->round_hard--;
+		goto out_xs_state;
 	}
 
-	if (lft->real_hard_pkt_limit <= lft->real_soft_pkt_limit) {
-		//if (!hard_cnt) {
-		//	xfrm_state_expire(xs, 1);
-		//	printk("Notify hard obj_id=0x%d, xs=%p\n", obj_id, xs);
-		//} else {
-			printk("Something wrong. Should have hard event now\n");
-		//}
+	if (async_work->retry && (hard_cnt == IPSEC_SW_LIMIT))
 		goto out_xs;
-	}
 
-	/* Check if this is last soft event */
-	if (lft->real_hard_pkt_limit <= lft->last_cnt) {
-		lft->real_hard_pkt_limit -= (lft->last_cnt - hard_cnt);	
-		xfrm_state_expire(xs, 0);
-		printk("Notify soft obj_id=0x%d, xs=%p\n", obj_id, xs);
-		goto out_xs;
-	}
-
-	if (lft->real_soft_pkt_limit < IPSEC_SW_LIMIT) {
+	if (async_work->retry && !soft_cnt) {
 		ipsec_aso_set(priv, obj_id,
-			      ARM_SOFT | SET_SOFT | SET_CNT_BIT31,
-			      lft->real_soft_pkt_limit,
-			      &hard_cnt, &soft_cnt);
-		printk("real arm soft set soft set bit 31 hard_cnt=%d, soft_cnt=%d\n", hard_cnt, soft_cnt);
-		lft->real_hard_pkt_limit -= (lft->last_cnt - hard_cnt);
-		lft->last_cnt = hard_cnt | IPSEC_SW_LIMIT;
+			      SET_SOFT | ARM_SOFT | SET_CNT_BIT31,
+			      IPSEC_SW_LIMIT, NULL, NULL);
+		goto out_xs_state;
+	}
+
+	if (lft->round_soft == 1) {
+		printk("Notify soft obj_id=0x%d, xs=%p\n", obj_id, xs);
+		xfrm_state_expire(xs, 0);
+		lft->round_soft = 0;
+	}
+
+	if (lft->is_simulated == false) {
+		lft->round_hard--;
+		goto out_xs_state;
+	}	
+
+	/* Simulated case */
+	if (hard_cnt < IPSEC_SW_LIMIT)
+		lft->round_hard--;
+
+	printk("hard_cnt=%d, lft->round_soft=%d\n", hard_cnt, lft->round_soft);
+
+	if ((hard_cnt != IPSEC_SW_LIMIT) && lft->round_soft)
+		lft->round_soft--;
+
+	printk("002 hard_cnt=%d, lft->round_soft=%d\n", hard_cnt, lft->round_soft);
+
+	if (!lft->round_hard) {
+		printk("round_hard zero should not be here\n");
+		xfrm_state_expire(xs, 0);
+		goto out_xs_state;
+	}
+
+	if (hard_cnt > IPSEC_SW_LIMIT)
+		goto out_xs_state;
+
+	if (!lft->round_soft)
+		goto check_hard;
+
+	new_soft_cnt = 0;
+	if (lft->round_soft == 1) {
+		if (lft->round_hard == 1) {
+			printk("Try our best Notify soft obj_id=0x%d, xs=%p\n", obj_id, xs);
+			lft->round_soft--;
+			xfrm_state_expire(xs, 0);
+			goto out_xs_state;
+		}
+
+		new_soft_cnt = IPSEC_SW_LIMIT + lft->mod_hard - lft->mod_soft;
+
+		printk("new_soft_cnt=%d\n", new_soft_cnt);
+		if (new_soft_cnt > (IPSEC_SW_LIMIT + hard_cnt - IPSEC_1MIN)) {
+			printk("Adjust soft_cnt to be safe, new_soft_cnt=%d\n", new_soft_cnt);
+			new_soft_cnt = IPSEC_SW_LIMIT + hard_cnt - IPSEC_1MIN;
+		} else if (new_soft_cnt <= IPSEC_1MIN) {
+			new_soft_cnt = IPSEC_1MIN + 1;
+		}
+
+		ipsec_aso_set(priv, obj_id,
+		      SET_SOFT | ARM_SOFT | SET_CNT_BIT31,
+		      new_soft_cnt, &hard_cnt, &soft_cnt);
 		goto out_xs;
 	}
 
-	/* soft pkt limit >= IPSEC_SW_LIMIT */
-	if (soft_cnt) {
+check_hard:
+	if (lft->round_hard == 1)
+		goto out_xs_state;
+	
+	if (soft_cnt != IPSEC_SW_LIMIT)
+		ipsec_aso_set(priv, obj_id,
+			      SET_SOFT | ARM_SOFT | SET_CNT_BIT31,
+			      IPSEC_SW_LIMIT, &hard_cnt, &soft_cnt);
+	else
 		ipsec_aso_set(priv, obj_id,
 			      ARM_SOFT | SET_CNT_BIT31,
 			      0, &hard_cnt, &soft_cnt);
-		printk("arm soft set bit 31 hard_cnt=%d, soft_cnt=%d\n", hard_cnt, soft_cnt);
-	} else if (!soft_cnt && (hard_cnt != lft->last_cnt)) {
-		ipsec_aso_set(priv, obj_id,
-			      ARM_SOFT | SET_SOFT | SET_CNT_BIT31,
-			      IPSEC_SW_LIMIT, &hard_cnt, &soft_cnt);
-		printk("initial arm soft set soft set bit 31 hard_cnt=%d, soft_cnt=%d\n", hard_cnt, soft_cnt);
-	}
-		
-	lft->real_hard_pkt_limit -= (lft->last_cnt - hard_cnt);
-	if (lft->real_soft_pkt_limit > IPSEC_SW_LIMIT)
-		lft->real_soft_pkt_limit -= (lft->last_cnt - hard_cnt);
-	lft->last_cnt = hard_cnt | IPSEC_SW_LIMIT;
 
+out_xs:
 	/* If there is no packet after the soft event, need to setup workqueue to monitor */
-	if (hard_cnt == soft_cnt || !soft_cnt) {
+	if (hard_cnt == IPSEC_SW_LIMIT && (soft_cnt == IPSEC_SW_LIMIT || !soft_cnt)) {
 		// There is no more traffic after soft event
 		struct mlx5e_ipsec_async_work *retry_work;
 
@@ -958,7 +952,7 @@ static void _mlx5e_ipsec_async_event(struct work_struct *work)
 		retry_work->obj_id = obj_id;
 		if (async_work->retry == 1) {
 			xfrm_state_expire(xs, 1);
-			goto out_xs;
+			goto out_xs_state;
 		}
 
 		retry_work->retry = async_work->retry > 1 ? async_work->retry - 1 : NO_TRAFFIC_RETRY;
@@ -968,15 +962,8 @@ static void _mlx5e_ipsec_async_event(struct work_struct *work)
 		printk("async_event schedule work\n");
 	}
 
-out_xs:
-	/* read back remove later */
-	//ipsec_aso_set(priv, obj_id, 0, 0, &hard_cnt, &soft_cnt);
-
-	printk("_mlx5e_ipsec_async_event exit real_hard=%d, real_soft=%d\n",  lft->real_hard_pkt_limit, lft->real_soft_pkt_limit);
-	if (prev_hard < lft->real_hard_pkt_limit) {
-		printk("bad wqe\n");
-		xfrm_state_expire(xs, 1);
-	}
+out_xs_state:
+	mlx5_core_err(priv->mdev, "_mlx5e_ipsec_async_event ENDDDDDD obj_id=0x%d, xs=%p, round_soft=%d, round_hard=%d, mod_soft=%d, mod_hard=%d\n", obj_id, xs, lft->round_soft, lft->round_hard, lft->mod_soft, lft->mod_hard);
 	xfrm_state_put(xs);
 
 out_async_work:

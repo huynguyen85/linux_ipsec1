@@ -97,6 +97,7 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 	u8 ds_cnt;
 
 	ds_cnt = DIV_ROUND_UP(sizeof(struct mlx5e_aso_wqe), MLX5_SEND_WQE_DS);
+	printk("mlx5e_build_aso_wqe sq->pc=0x%x\n", sq->pc);
 	cseg->opmod_idx_opcode = cpu_to_be32(ASO_OPC_MOD_IPSEC_SHIFTED |
 					     (sq->pc << MLX5_WQE_CTRL_WQE_INDEX_SHIFT) |
 					     MLX5_OPCODE_ACCESS_ASO);
@@ -104,6 +105,7 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 	cseg->fm_ce_se   = MLX5_WQE_CTRL_CQ_UPDATE;
 	cseg->general_id = cpu_to_be32(ipsec_obj_id);
 
+	memset(aso_ctrl, 0, sizeof(*aso_ctrl));	
 	aso_ctrl->va_l  = cpu_to_be32(aso->dma_addr | ASO_CTRL_READ_EN);
 	aso_ctrl->va_h  = cpu_to_be32(aso->dma_addr >> 32);
 	aso_ctrl->l_key = cpu_to_be32(aso->mkey.key);
@@ -122,6 +124,7 @@ static inline void mlx5e_build_aso_wqe(struct mlx5e_ipsec_aso *aso,
 		aso_ctrl->bitwise_data = cpu_to_be64(param->bitwise_data);
 		aso_ctrl->data_mask = cpu_to_be64(param->data_mask);
 	}
+
 	//printk("aso->dma_addr=0x%lx, aso_ctrl->va_l=0x%x, aso_ctrl->va_h=0x%x\n", aso->dma_addr, aso_ctrl->va_l, aso_ctrl->va_h);
 }
 

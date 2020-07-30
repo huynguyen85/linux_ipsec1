@@ -107,15 +107,19 @@ struct mlx5e_ipsec_rule {
 	struct mlx5_pkt_reformat * pkt_reformat;
 };
 
-#define IPSEC_NO_LIMIT 0xFFFFFFFFFFFFFFFF
+#define IPSEC_NO_LIMIT     0xFFFFFFFFFFFFFFFF
 #define IPSEC_SW_LIMIT_BIT 2 /* 31 */
-#define IPSEC_HW_LIMIT BIT(IPSEC_SW_LIMIT_BIT + 1)
-#define IPSEC_SW_LIMIT BIT(IPSEC_SW_LIMIT_BIT)
+#define IPSEC_HW_LIMIT     BIT(IPSEC_SW_LIMIT_BIT + 1)
+#define IPSEC_SW_LIMIT     BIT(IPSEC_SW_LIMIT_BIT)
+#define IPSEC_SW_MASK      (IPSEC_SW_LIMIT - 1)
+#define IPSEC_1MIN         (IPSEC_SW_LIMIT / 4)
 
 struct mlx5e_ipsec_state_lft {
-	u64 real_soft_pkt_limit;
-	u64 real_hard_pkt_limit;
-	u64 last_cnt; /* last remove_flow_pkt_cnt */
+	u64 round_soft;
+	u64 round_hard;
+	u64 mod_soft;
+	u64 mod_hard;
+	bool is_simulated;
 };
 
 struct mlx5e_ipsec_sa_entry {

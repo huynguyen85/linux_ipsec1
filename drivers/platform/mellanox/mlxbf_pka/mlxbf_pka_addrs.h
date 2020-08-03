@@ -1,0 +1,293 @@
+/* SPDX-License-Identifier: GPL-2.0-only OR Linux-OpenIB
+ *
+ * Copyright (c) 2020 NVIDIA Corporation. All rights reserved.
+ */
+
+#ifndef __MLXBF_PKA_ADDRS_H__
+#define __MLXBF_PKA_ADDRS_H__
+
+/* Define memory size in bytes */
+#define MLXBF_PKA_MEM_SIZE_4KB 0x1000
+#define MLXBF_PKA_MEM_SIZE_8KB 0x2000
+#define MLXBF_PKA_MEM_SIZE_16KB 0x4000
+#define MLXBF_PKA_MEM_SIZE_32KB 0x8000
+#define MLXBF_PKA_MEM_SIZE_64KB 0x10000
+
+/*
+ * COMMON SPACE
+ */
+#define MLXBF_PKA_CRYPTO_COMMON_BASE 0x0
+
+/*
+ * Common IO CSR addresses/offsets: These are all addressed as 8-byte
+ * registers.
+ */
+#define MLXBF_PKA_DEV_INFO_ADDR (0x00 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+#define MLXBF_PKA_DEV_CTL_ADDR (0x08 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+#define MLXBF_PKA_MMIO_INFO_ADDR (0x10 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+#define MLXBF_PKA_SCRATCHPAD_ADDR (0x20 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+#define MLXBF_PKA_SEMAPHORE0_ADDR (0x28 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+#define MLXBF_PKA_SEMAPHORE1_ADDR (0x30 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+#define MLXBF_PKA_CLOCK_COUNT_ADDR (0x38 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+#define MLXBF_PKA_INT_SETUP_ADDR (0x40 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+#define MLXBF_PKA_CRED_CTL_ADDR (0x50 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+#define MLXBF_PKA_SAM_CTL_ADDR (0x58 | MLXBF_PKA_CRYPTO_COMMON_BASE)
+
+/*
+ * CRYPTO SPACE
+ */
+
+/* All addresses/offsets herein are BYTE addresses. */
+
+/* EIP154 CSRS: */
+
+#define MLXBF_PKA_EIP154_ADDR 0x400000
+/*
+ * Global Control Space CSR addresses/offsets. These are accessed from the
+ * ARM as 8 byte reads/writes however only the bottom 32 bits are implemented.
+ */
+#define MLXBF_PKA_CLOCK_SWITCH_ADDR (0x11C68 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_CLK_FORCE_ADDR (0x11C80 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_MODE_SELECTION_ADDR (0x11C88 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_PROT_STATUS_ADDR (0x11C90 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_OPTIONS_ADDR (0x11DF0 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_VERSION_ADDR (0x11DF8 | MLXBF_PKA_EIP154_ADDR)
+
+/*
+ * Advanced Interrupt Controller CSR addresses/offsets. These are accessed
+ * from the ARM as 8 byte reads/writes however only the bottom 32 bits are
+ * implemented.
+ */
+#define MLXBF_PKA_AIC_POL_CTRL_ADDR (0x11E00 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_AIC_TYPE_CTRL_ADDR (0x11E08 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_AIC_ENABLE_CTRL_ADDR (0x11E10 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_AIC_RAW_STAT_ADDR (0x11E18 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_AIC_ENABLE_SET_ADDR (0x11E18 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_AIC_ENABLED_STAT_ADDR (0x11E20 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_AIC_ACK_ADDR (0x11E20 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_AIC_ENABLE_CLR_ADDR (0x11E28 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_AIC_OPTIONS_ADDR (0x11E30 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_AIC_VERSION_ADDR (0x11E38 | MLXBF_PKA_EIP154_ADDR)
+
+/*
+ * The True Random Number Generator CSR addresses/offsets. These are accessed
+ * from the ARM as 8 byte reads/writes however only the bottom 32 bits are
+ * implemented.
+ */
+#define MLXBF_PKA_TRNG_OUTPUT_0_ADDR (0x12000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_OUTPUT_1_ADDR (0x12008 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_OUTPUT_2_ADDR (0x12010 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_OUTPUT_3_ADDR (0x12018 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_STATUS_ADDR (0x12020 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_INTACK_ADDR (0x12020 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_CONTROL_ADDR (0x12028 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_CONFIG_ADDR (0x12030 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_ALARMCNT_ADDR (0x12038 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_FROENABLE_ADDR (0x12040 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_FRODETUNE_ADDR (0x12048 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_ALARMMASK_ADDR (0x12050 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_ALARMSTOP_ADDR (0x12058 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_BLOCKCNT_ADDR (0x120E8 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_TRNG_OPTIONS_ADDR (0x120F0 | MLXBF_PKA_EIP154_ADDR)
+
+/*
+ * Control register address/offset. This is accessed from the ARM using 8
+ * byte reads/writes however only the bottom 32 bits are implemented.
+ */
+#define MLXBF_PKA_MASTER_SEQ_CTRL_ADDR (0x27F90 | MLXBF_PKA_EIP154_ADDR)
+
+/*
+ * Ring CSRs:  These are all accessed from the ARM using 8 byte reads/writes
+ * however only the bottom 32 bits are implemented.
+ */
+
+/* Ring 0 CSRS */
+#define MLXBF_PKA_COMMAND_COUNT_0_ADDR (0x80080 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RESULT_COUNT_0_ADDR (0x80088 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_IRQ_THRESH_0_ADDR (0x80090 | MLXBF_PKA_EIP154_ADDR)
+
+/* Ring 1 CSRS: */
+#define MLXBF_PKA_COMMAND_COUNT_1_ADDR (0x90080 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RESULT_COUNT_1_ADDR (0x90088 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_IRQ_THRESH_1_ADDR (0x90090 | MLXBF_PKA_EIP154_ADDR)
+
+/* Ring 2 CSRS: */
+#define MLXBF_PKA_COMMAND_COUNT_2_ADDR (0xA0080 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RESULT_COUNT_2_ADDR (0xA0088 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_IRQ_THRESH_2_ADDR (0xA0090 | MLXBF_PKA_EIP154_ADDR)
+
+/* Ring 3 CSRS: */
+#define MLXBF_PKA_COMMAND_COUNT_3_ADDR (0xB0080 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RESULT_COUNT_3_ADDR (0xB0088 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_IRQ_THRESH_3_ADDR (0xB0090 | MLXBF_PKA_EIP154_ADDR)
+
+/*
+ * EIP154 RAM regions: Note that the FARM_PROG_RAM_X address range overlaps
+ * with the FARM_DATA_RAM_X and FARM_DATA_RAM_X_EXT address ranges.  This
+ * conflict is resolved by using the FARM_PROG_RAM_X only when the
+ * Sequencer is in SW reset, and the DATA_RAMs are picked only when the
+ * engine is operation.
+ *
+ *  Note:
+ *      The FARM_DATA_RAM_X_EXT RAMs may also be
+ *      called the LNME FIFO RAMs in some of the documentation.
+ *
+ *          MLXBF_PKA_BUFFER_RAM        : 1024 x 64  -  8K bytes
+ *          MLXBF_PKA_SECURE_RAM        : 1536 x 64  - 12K bytes
+ *          MLXBF_PKA_MASTER_PROG_RAM   : 8192 x 32  - 32K bytes
+ *          MLXBF_PKA_FARM_DATA_RAM_X       : 1024 x 64  -  8K bytes
+ *          MLXBF_PKA_FARM_DATA_RAM_X_EXT   :  256 x 32  -  1K bytes
+ *          MLXBF_PKA_FARM_PROG_RAM_X       : 2048 x 32  -  8K bytes
+ *
+ *  Note:
+ *      Since hardware guys multiplied the address by 2, the size of
+ *      each memory/register group increased and became two times larger.
+ *      Memory size should be adjusted accordingly:
+ *          PKA Buffer RAM size :                8KB  --> 16KB
+ *          PKA Secure RAM size :                8KB  --> 16KB
+ *          PKA Master Program RAM size :       32KB  --> 64KB
+ *          PKA Farm Data RAM size :             4KB  -->  8KB
+ *          PKA Farm Data RAM extension size :   4KB  -->  8KB
+ *          PKA Farm Program RAM size :          8KB  --> 16KB
+ */
+#define MLXBF_PKA_BUFFER_RAM_BASE (0x00000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_BUFFER_RAM_SIZE                                              \
+	MLXBF_PKA_MEM_SIZE_16KB /* 0x00000...0x03FFF */
+
+#define MLXBF_PKA_SECURE_RAM_BASE (0x20000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_SECURE_RAM_SIZE                                              \
+	MLXBF_PKA_MEM_SIZE_16KB /* 0x20000...0x23FFF */
+
+#define MLXBF_PKA_MASTER_PROG_RAM_BASE (0x30000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_MASTER_PROG_RAM_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_64KB /* 0x30000...0x3FFFF */
+
+#define MLXBF_PKA_FARM_DATA_RAM_0_BASE (0x40000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_0_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x40000...0x41FFF */
+#define MLXBF_PKA_FARM_DATA_RAM_0_EXT_BASE (0x42000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_0_EXT_SIZE                                     \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x42000...0x43FFF */
+#define MLXBF_PKA_FARM_PROG_RAM_0_BASE (0x40000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_PROG_RAM_0_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_16KB /* 0x40000...0x43FFF */
+#define MLXBF_PKA_FARM_DATA_RAM_1_BASE (0x44000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_1_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x44000...0x45FFF */
+#define MLXBF_PKA_FARM_DATA_RAM_1_EXT_BASE (0x46000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_1_EXT_SIZE                                     \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x46000...0x47FFF */
+#define MLXBF_PKA_FARM_PROG_RAM_1_BASE (0x44000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_PROG_RAM_1_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_16KB /* 0x44000...0x47FFF */
+#define MLXBF_PKA_FARM_DATA_RAM_2_BASE (0x48000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_2_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x48000...0x49FFF */
+#define MLXBF_PKA_FARM_DATA_RAM_2_EXT_BASE (0x4A000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_2_EXT_SIZE                                     \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x4A000...0x4BFFF */
+#define MLXBF_PKA_FARM_PROG_RAM_2_BASE (0x48000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_PROG_RAM_2_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_16KB /* 0x48000...0x4BFFF */
+#define MLXBF_PKA_FARM_DATA_RAM_3_BASE (0x4C000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_3_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x4C000...0x4DFFF */
+#define MLXBF_PKA_FARM_DATA_RAM_3_EXT_BASE (0x4E000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_3_EXT_SIZE                                     \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x4E000...0x4FFFF */
+#define MLXBF_PKA_FARM_PROG_RAM_3_BASE (0x4C000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_PROG_RAM_3_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_16KB /* 0x4C000...0x4FFFF */
+#define MLXBF_PKA_FARM_DATA_RAM_4_BASE (0x50000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_4_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x50000...0x51FFF */
+#define MLXBF_PKA_FARM_DATA_RAM_4_EXT_BASE (0x52000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_4_EXT_SIZE                                     \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x52000...0x53FFF */
+#define MLXBF_PKA_FARM_PROG_RAM_4_BASE (0x50000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_PROG_RAM_4_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_16KB /* 0x50000...0x53FFF */
+#define MLXBF_PKA_FARM_DATA_RAM_5_BASE (0x54000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_5_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x54000...0x55FFF */
+#define MLXBF_PKA_FARM_DATA_RAM_5_EXT_BASE (0x56000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_DATA_RAM_5_EXT_SIZE                                     \
+	MLXBF_PKA_MEM_SIZE_8KB /* 0x56000...0x57FFF */
+#define MLXBF_PKA_FARM_PROG_RAM_5_BASE (0x54000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_FARM_PROG_RAM_5_SIZE                                         \
+	MLXBF_PKA_MEM_SIZE_16KB /* 0x54000...0x57FFF */
+
+/*
+ * PKA Buffer RAM offsets. These are NOT real CSR's but instead are
+ * specific offset/addresses within the EIP154 MLXBF_PKA_BUFFER_RAM.
+ */
+
+/* Ring 0 */
+#define MLXBF_PKA_RING_CMMD_BASE_0_ADDR (0x00000 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RSLT_BASE_0_ADDR (0x00010 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_SIZE_TYPE_0_ADDR (0x00020 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RW_PTRS_0_ADDR (0x00028 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RW_STAT_0_ADDR (0x00030 | MLXBF_PKA_EIP154_ADDR)
+
+/* Ring 1 */
+#define MLXBF_PKA_RING_CMMD_BASE_1_ADDR (0x00040 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RSLT_BASE_1_ADDR (0x00050 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_SIZE_TYPE_1_ADDR (0x00060 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RW_PTRS_1_ADDR (0x00068 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RW_STAT_1_ADDR (0x00070 | MLXBF_PKA_EIP154_ADDR)
+
+/* Ring 2 */
+#define MLXBF_PKA_RING_CMMD_BASE_2_ADDR (0x00080 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RSLT_BASE_2_ADDR (0x00090 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_SIZE_TYPE_2_ADDR (0x000A0 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RW_PTRS_2_ADDR (0x000A8 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RW_STAT_2_ADDR (0x000B0 | MLXBF_PKA_EIP154_ADDR)
+
+/* Ring 3 */
+#define MLXBF_PKA_RING_CMMD_BASE_3_ADDR (0x000C0 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RSLT_BASE_3_ADDR (0x000D0 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_SIZE_TYPE_3_ADDR (0x000E0 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RW_PTRS_3_ADDR (0x000E8 | MLXBF_PKA_EIP154_ADDR)
+#define MLXBF_PKA_RING_RW_STAT_3_ADDR (0x000F0 | MLXBF_PKA_EIP154_ADDR)
+
+/* Ring Options */
+#define MLXBF_PKA_RING_OPTIONS_ADDR (0x07FF8 | MLXBF_PKA_EIP154_ADDR)
+
+/*
+ * Note the registers/memory below include MiCA specific PKA Control/Status
+ * registers and the 64K RAM's that the EIP-154 calls Host Memory.
+ */
+
+/*
+ * Note that Window RAM size is 64K however only the low 16K can be accessed.
+ */
+#define MLXBF_PKA_WINDOW_RAM_BASE 0x500000
+#define MLXBF_PKA_WINDOW_RAM_SIZE MLXBF_PKA_MEM_SIZE_64KB
+#define MLXBF_PKA_WINDOW_RAM_REGION_SIZE MLXBF_PKA_MEM_SIZE_16KB
+
+#define MLXBF_PKA_WINDOW_RAM_REGION_0_BASE 0x600000
+#define MLXBF_PKA_WINDOW_RAM_REGION_0_SIZE MLXBF_PKA_WINDOW_RAM_REGION_SIZE
+#define MLXBF_PKA_WINDOW_RAM_REGION_1_BASE 0x610000
+#define MLXBF_PKA_WINDOW_RAM_REGION_1_SIZE MLXBF_PKA_WINDOW_RAM_REGION_SIZE
+#define MLXBF_PKA_WINDOW_RAM_REGION_2_BASE 0x620000
+#define MLXBF_PKA_WINDOW_RAM_REGION_2_SIZE MLXBF_PKA_WINDOW_RAM_REGION_SIZE
+#define MLXBF_PKA_WINDOW_RAM_REGION_3_BASE 0x630000
+#define MLXBF_PKA_WINDOW_RAM_REGION_3_SIZE MLXBF_PKA_WINDOW_RAM_REGION_SIZE
+
+/* Currently, we do not use these MiCA specific CSRs. */
+#define MLXBF_PKI_EXT_CSR_START_ADDR 0x520000
+
+/*
+ * The PKI (not EIP154) CSR address/offsets: These are all addressed as
+ * 8-byte registers.
+ */
+#define MLXBF_PKA_INT_MASK_ADDR (0x00 | MLXBF_PKI_EXT_CSR_START_ADDR)
+#define MLXBF_PKA_INT_MASK_SET_ADDR (0x08 | MLXBF_PKI_EXT_CSR_START_ADDR)
+#define MLXBF_PKA_INT_MASK_RESET_ADDR (0x10 | MLXBF_PKI_EXT_CSR_START_ADDR)
+#define MLXBF_PKA_ZEROIZE_ADDR (0x40 | MLXBF_PKI_EXT_CSR_START_ADDR)
+#define MLXBF_PKA_TST_FRO_ADDR (0x50 | MLXBF_PKI_EXT_CSR_START_ADDR)
+#define MLXBF_PKA_FRO_COUNT_ADDR (0x58 | MLXBF_PKI_EXT_CSR_START_ADDR)
+#define MLXBF_PKA_PARITY_CTL_ADDR (0x60 | MLXBF_PKI_EXT_CSR_START_ADDR)
+#define MLXBF_PKA_PARITY_STAT_ADDR (0x68 | MLXBF_PKI_EXT_CSR_START_ADDR)
+
+#endif /* __MLXBF_PKA_ADDRS_H__ */

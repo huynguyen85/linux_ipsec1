@@ -21,6 +21,7 @@
 #include "en.h"
 #include "en_tc.h"
 #include "en_rep.h"
+#include "fs_core.h"
 
 #define MLX5_CT_ZONE_BITS (mlx5e_tc_attr_to_reg_mappings[ZONE_TO_REG].mlen * 8)
 #define MLX5_CT_ZONE_MASK GENMASK(MLX5_CT_ZONE_BITS - 1, 0)
@@ -50,6 +51,9 @@ struct mlx5_tc_ct_priv {
 	struct mlx5_flow_table *ct;
 	struct mlx5_flow_table *ct_nat;
 	struct mlx5_flow_table *post_ct;
+	struct mlx5_flow_table *trk_new_ct;
+	struct mlx5_flow_group *miss_grp;
+	struct mlx5_flow_handle *miss_rule;
 	struct mutex control_lock; /* guards parallel adds/dels */
 	struct mutex shared_counter_lock;
 	struct mapping_ctx *zone_mapping;
@@ -1490,14 +1494,14 @@ mlx5_tc_ct_del_ft_cb(struct mlx5_tc_ct_priv *ct_priv, struct mlx5_ct_ft *ft)
  *      | set zone
  *      v
  * +--------------------+
- * + CT (nat or no nat) +
- * + tuple + zone match +
- * +--------------------+
- *      | set mark
- *      | set labels_id
- *      | set established
- *	| set zone_restore
- *      | do nat (if needed)
+ * + CT (nat or no nat) +    miss          +---------------------+  miss
+ * + tuple + zone match +----------------->+ trk_new_ct          +-------> SW
+ * +--------------------+                  + vxlan||roce match   +
+ *      | set mark                         +---------------------+
+ *      | set labels_id                             | set ct_state +trk+new
+ *      | set established                           | set zone_restore
+ *	| set zone_restore                          v
+ *      | do nat (if needed)                      post_ct
  *      v
  * +--------------+
  * + post_ct      + original filter actions
@@ -1893,6 +1897,72 @@ mlx5_tc_ct_init_check_support(struct mlx5e_priv *priv,
 		return mlx5_tc_ct_init_check_nic_support(priv, err_msg);
 }
 
+static struct mlx5_flow_handle *
+tc_ct_add_miss_rule(struct mlx5_flow_table *ft,
+		    struct mlx5_flow_table *next_ft)
+{
+	struct mlx5_flow_destination dest = {};
+	struct mlx5_flow_act act = {};
+
+	act.flags  = FLOW_ACT_IGNORE_FLOW_LEVEL | FLOW_ACT_NO_APPEND;
+	act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST;
+	dest.type  = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
+	dest.ft = next_ft;
+
+	return mlx5_add_flow_rules(ft, NULL, &act, &dest, 1);
+}
+
+static int
+tc_ct_add_ct_table_miss_rule(struct mlx5_tc_ct_priv *ct_priv)
+{
+	int inlen = MLX5_ST_SZ_BYTES(create_flow_group_in);
+	struct mlx5_flow_handle *miss_rule;
+	struct mlx5_flow_group *miss_group;
+	int max_fte = ct_priv->ct->max_fte;
+	u32 *flow_group_in;
+	int err = 0;
+
+	flow_group_in = kvzalloc(inlen, GFP_KERNEL);
+	if (!flow_group_in)
+		return -ENOMEM;
+
+	/* create miss group */
+	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index,
+		 max_fte - 2);
+	MLX5_SET(create_flow_group_in, flow_group_in, end_flow_index,
+		 max_fte - 1);
+	miss_group = mlx5_create_flow_group(ct_priv->ct, flow_group_in);
+	if (IS_ERR(miss_group)) {
+		err = PTR_ERR(miss_group);
+		goto err_miss_grp;
+	}
+
+	/* add miss rule to next fdb */
+	miss_rule = tc_ct_add_miss_rule(ct_priv->ct, ct_priv->trk_new_ct);
+	if (IS_ERR(miss_rule)) {
+		err = PTR_ERR(miss_rule);
+		goto err_miss_rule;
+	}
+
+	ct_priv->miss_grp = miss_group;
+	ct_priv->miss_rule = miss_rule;
+	kvfree(flow_group_in);
+	return 0;
+
+err_miss_rule:
+	mlx5_destroy_flow_group(miss_group);
+err_miss_grp:
+	kvfree(flow_group_in);
+	return err;
+}
+
+static void
+tc_ct_del_ct_table_miss_rule(struct mlx5_tc_ct_priv *ct_priv)
+{
+	mlx5_del_flow_rules(ct_priv->miss_rule);
+	mlx5_destroy_flow_group(ct_priv->miss_grp);
+}
+
 #define INIT_ERR_PREFIX "tc ct offload init failed"
 
 struct mlx5_tc_ct_priv *
@@ -1962,6 +2032,18 @@ mlx5_tc_ct_init(struct mlx5e_priv *priv, struct mlx5_fs_chains *chains,
 		goto err_post_ct_tbl;
 	}
 
+	ct_priv->trk_new_ct = mlx5_chains_create_global_table(chains);
+	if (IS_ERR(ct_priv->trk_new_ct)) {
+		err = PTR_ERR(ct_priv->trk_new_ct);
+		mlx5_core_warn(dev, "%s, failed to create trk new ct table err: %d",
+			       INIT_ERR_PREFIX, err);
+		goto err_trk_new_ct_tbl;
+	}
+
+	err = tc_ct_add_ct_table_miss_rule(ct_priv);
+	if (err)
+		goto err_init_ct_tbl;
+
 	idr_init(&ct_priv->fte_ids);
 	mutex_init(&ct_priv->control_lock);
 	mutex_init(&ct_priv->shared_counter_lock);
@@ -1971,6 +2053,10 @@ mlx5_tc_ct_init(struct mlx5e_priv *priv, struct mlx5_fs_chains *chains,
 
 	return ct_priv;
 
+err_init_ct_tbl:
+	mlx5_chains_destroy_global_table(chains, ct_priv->trk_new_ct);
+err_trk_new_ct_tbl:
+	mlx5_chains_destroy_global_table(chains, ct_priv->post_ct);
 err_post_ct_tbl:
 	mlx5_chains_destroy_global_table(chains, ct_priv->ct_nat);
 err_ct_nat_tbl:
@@ -1997,6 +2083,8 @@ mlx5_tc_ct_clean(struct mlx5_tc_ct_priv *ct_priv)
 
 	chains = ct_priv->chains;
 
+	tc_ct_del_ct_table_miss_rule(ct_priv);
+	mlx5_chains_destroy_global_table(chains, ct_priv->trk_new_ct);
 	mlx5_chains_destroy_global_table(chains, ct_priv->post_ct);
 	mlx5_chains_destroy_global_table(chains, ct_priv->ct_nat);
 	mlx5_chains_destroy_global_table(chains, ct_priv->ct);

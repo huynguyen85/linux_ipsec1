@@ -3255,11 +3255,11 @@ static bool actions_match_supported(struct mlx5e_priv *priv,
 				    struct mlx5e_tc_flow *flow,
 				    struct netlink_ext_ack *extack)
 {
-	bool ct_flow = false, ct_clear = false;
+	bool ct_flow = false, ct_clear = false, ct_new = false;
 	u32 actions;
 
-	ct_clear = flow->attr->ct_attr.ct_action &
-		TCA_CT_ACT_CLEAR;
+	ct_clear = flow->attr->ct_attr.ct_action & TCA_CT_ACT_CLEAR;
+	ct_new = flow->attr->ct_attr.ct_state & MLX5_CT_STATE_NEW_BIT;
 	ct_flow = flow_flag_test(flow, CT) && !ct_clear;
 	actions = flow->attr->action;
 
@@ -3272,6 +3272,16 @@ static bool actions_match_supported(struct mlx5e_priv *priv,
 					   "Can't offload mirroring with action ct");
 			return false;
 		}
+	}
+
+	if (ct_new && ct_flow) {
+		NL_SET_ERR_MSG_MOD(extack, "Can't offload ct_state new with action ct");
+		return false;
+	}
+
+	if (ct_new && flow->attr->dest_chain) {
+		NL_SET_ERR_MSG_MOD(extack, "Can't offload ct_state new with action goto");
+		return false;
 	}
 
 	if (actions & MLX5_FLOW_CONTEXT_ACTION_MOD_HDR)

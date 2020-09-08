@@ -29,14 +29,14 @@ struct mlxbf_pka_dev_region_info_t {
 };
 
 /*
- * MLXBF_PKA_VFIO_GET_REGION_INFO:
+ * MLXBF_PKA_RING_GET_REGION_INFO:
  * _IORW(MLXBF_PKA_IOC_TYPE, 0x0, mlxbf_pka_dev_region_info_t)
  * Retrieve information about a device region. This is intended to describe
  * MMIO, I/O port, as well as bus specific regions (ex. PCI config space).
  * Zero sized regions may be used to describe unimplemented regions.
  * Return: 0 on success, -errno on failure.
  */
-#define MLXBF_PKA_VFIO_GET_REGION_INFO                                         \
+#define MLXBF_PKA_RING_GET_REGION_INFO                                         \
 	_IOWR(MLXBF_PKA_IOC_TYPE, 0x0, struct mlxbf_pka_dev_region_info_t)
 
 /** mlxbf_pka_dev_hw_ring_info_t - PKA device ring structure
@@ -67,14 +67,21 @@ struct mlxbf_pka_dev_hw_ring_info_t { /* Bluefield specific ring information */
 };
 
 /*
- * MLXBF_PKA_VFIO_GET_RING_INFO:
+ * MLXBF_PKA_GET_RING_INFO:
  * _IORW(MLXBF_PKA_IOC_TYPE, 0x1, struct mlxbf_pka_dev_ring_info_t)
  * Retrieve information about a ring. This is intended to describe ring
  * information words located in MLXBF_PKA_BUFFER_RAM. Ring information includes
  * base addresses, size and statistics.
  * Return: 0 on success, -errno on failure.
  */
-#define MLXBF_PKA_VFIO_GET_RING_INFO                                           \
+#define MLXBF_PKA_GET_RING_INFO                                                \
 	_IOWR(MLXBF_PKA_IOC_TYPE, 0x1, struct mlxbf_pka_dev_hw_ring_info_t)
+
+/*
+ * MLXBF_PKA_CLEAR_RING_COUNTERS: _IO(MLXBF_PKA_IOC_TYPE, 0x2)
+ * Clear counters. This is intended to reset all command and result counters.
+ * Return: 0 on success, -errno on failure.
+ */
+#define MLXBF_PKA_CLEAR_RING_COUNTERS _IO(MLXBF_PKA_IOC_TYPE, 0x2)
 
 #endif /* __MLXBF_PKA_IOCTL_H__ */

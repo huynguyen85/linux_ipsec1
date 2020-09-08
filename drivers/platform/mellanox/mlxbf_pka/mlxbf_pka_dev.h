@@ -214,6 +214,11 @@ int mlxbf_pka_dev_unregister_shim(struct mlxbf_pka_dev_shim_t *shim);
 /* Reset a Ring. */
 int mlxbf_pka_dev_reset_ring(struct mlxbf_pka_dev_ring_t *ring);
 
+/* Clear ring counters. This function resets the master sequencer controller
+ * to clear the command and result counters.
+ */
+int mlxbf_pka_dev_clear_ring_counters(struct mlxbf_pka_dev_ring_t *ring);
+
 /*
  * Read data from the TRNG. Drivers can fill up to 'cnt' bytes of data into
  * the buffer 'data'. The buffer 'data' is aligned for any type and 'cnt' is
@@ -230,12 +235,12 @@ bool mlxbf_pka_dev_has_trng(struct mlxbf_pka_dev_shim_t *shim);
  * which is used to refer to the file. If un-successful, it returns a negative
  * error.
  */
-int mlxbf_pka_dev_open_ring(u32 ring_id);
+int mlxbf_pka_dev_open_ring(struct mlxbf_pka_ring_info_t *ring_info);
 
 /*
  * Close the file descriptor associated with ring. The function returns 0 if
  * successful, negative value to indicate an error.
  */
-int mlxbf_pka_dev_close_ring(u32 ring_id);
+int mlxbf_pka_dev_close_ring(struct mlxbf_pka_ring_info_t *ring_info);
 
 #endif /* __MLXBF_PKA_DEV_H__ */

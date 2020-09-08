@@ -36,14 +36,13 @@ static u64 mlxbf_pka_dev_timer_start(u32 usec)
 {
 	u64 cur_time = get_cycles();
 
-	return (cur_time +
-		(mlxbf_pka_early_cpu_speed() * usec) / MLXBF_PKA_MEGA);
+	return cur_time + (mlxbf_pka_early_cpu_speed() * usec) / MLXBF_PKA_MEGA;
 }
 
 /* Test a PKA device timer for completion. */
 static int mlxbf_pka_dev_timer_done(u64 timer)
 {
-	return (get_cycles() >= timer);
+	return get_cycles() >= timer;
 }
 
 /* Return register base address */
@@ -67,11 +66,7 @@ static u64 mlxbf_pka_dev_get_word_offset(u64 mem_base, u64 word_addr,
 
 static u64 mlxbf_pka_dev_io_read(void __iomem *mem_ptr, u64 mem_off)
 {
-	u64 data;
-
-	data = mlxbf_pka_mmio_read(mem_ptr + mem_off);
-
-	return data;
+	return mlxbf_pka_mmio_read(mem_ptr + mem_off);
 }
 
 static void mlxbf_pka_dev_io_write(void __iomem *mem_ptr, u64 mem_off,
@@ -114,7 +109,7 @@ static int mlxbf_pka_dev_put_resource(struct mlxbf_pka_dev_res_t *res,
 	}
 
 	/*
-	 * Check whether the resource shares the same memory map; If so,
+	 * Check whether the resource shares the same memory map. If so,
 	 * the memory map shouldn't be released.
 	 */
 	for (res_idx = 0; res_idx < MLXBF_PKA_DEV_SHIM_RES_CNT; res_idx++) {
@@ -147,9 +142,11 @@ static void __iomem *mlxbf_pka_dev_get_resource_ioaddr(u64 res_base,
 }
 
 /* Set PKA device resource config - - map io memory if needed. */
-static int mlxbf_pka_dev_set_resource_config(
-	struct mlxbf_pka_dev_shim_t *shim, struct mlxbf_pka_dev_res_t *res_ptr,
-	u64 res_base, u64 res_size, u64 res_type, char *res_name)
+static int
+mlxbf_pka_dev_set_resource_config(struct mlxbf_pka_dev_shim_t *shim,
+				  struct mlxbf_pka_dev_res_t *res_ptr,
+				  u64 res_base, u64 res_size,
+				  u64 res_type, char *res_name)
 {
 	if (res_ptr->status == MLXBF_PKA_DEV_RES_STATUS_MAPPED)
 		return -EPERM;
@@ -172,8 +169,7 @@ static int mlxbf_pka_dev_set_resource_config(
 	if (!res_ptr->ioaddr) {
 		if (!request_mem_region(res_ptr->base, res_ptr->size,
 					res_ptr->name)) {
-			MLXBF_PKA_ERROR(MLXBF_PKA_DEV,
-					"failed to get io memory region\n");
+			MLXBF_PKA_ERROR(MLXBF_PKA_DEV, "failed to get io memory region\n");
 			return -EPERM;
 		}
 
@@ -196,16 +192,47 @@ static void
 mlxbf_pka_dev_unset_resource_config(struct mlxbf_pka_dev_shim_t *shim,
 				    struct mlxbf_pka_dev_res_t *res_ptr)
 {
+	int rc;
+
 	if (res_ptr->status != MLXBF_PKA_DEV_RES_STATUS_MAPPED)
 		return;
 
-	if (res_ptr->ioaddr &&
-	    mlxbf_pka_dev_put_resource(res_ptr, shim->shim_id) != -EBUSY) {
+	rc = mlxbf_pka_dev_put_resource(res_ptr, shim->shim_id);
+
+	if (res_ptr->ioaddr && rc != -EBUSY) {
 		iounmap(res_ptr->ioaddr);
 		release_mem_region(res_ptr->base, res_ptr->size);
 	}
 
 	res_ptr->status = MLXBF_PKA_DEV_RES_STATUS_UNMAPPED;
+}
+
+int mlxbf_pka_dev_clear_ring_counters(struct mlxbf_pka_dev_ring_t *ring)
+{
+	struct mlxbf_pka_dev_res_t *master_seq_ctrl_ptr;
+	u64 master_reg_base, master_reg_off;
+	struct mlxbf_pka_dev_shim_t *shim;
+	void *master_reg_ptr;
+
+	shim = ring->shim;
+	master_seq_ctrl_ptr = &shim->resources.master_seq_ctrl;
+	master_reg_base = master_seq_ctrl_ptr->base;
+	master_reg_ptr = master_seq_ctrl_ptr->ioaddr;
+	master_reg_off = mlxbf_pka_dev_get_register_offset(master_reg_base,
+						MLXBF_PKA_MASTER_SEQ_CTRL_ADDR);
+
+	/* push the EIP-154 master controller into reset. */
+	mlxbf_pka_dev_io_write(master_reg_ptr, master_reg_off,
+			       MLXBF_PKA_MASTER_SEQ_CTRL_RESET_VAL);
+
+	/* clear counters. */
+	mlxbf_pka_dev_io_write(master_reg_ptr, master_reg_off,
+			       MLXBF_PKA_MASTER_SEQ_CTRL_CLEAR_COUNTERS_VAL);
+
+	/* take the EIP-154 master controller out of reset. */
+	mlxbf_pka_dev_io_write(master_reg_ptr, master_reg_off, 0);
+
+	return 0;
 }
 
 /*
@@ -330,8 +357,8 @@ static int mlxbf_pka_dev_release_ring(struct mlxbf_pka_dev_ring_t *ring)
 }
 
 /*
- * Partition the window RAM for a given PKA ring.  Here we statically divide
- * the 16K memory region into three partitions:  First partition is reserved
+ * Partition the window RAM for a given PKA ring. Here we statically divide
+ * the 16K memory region into three partitions: First partition is reserved
  * for command descriptor ring (1K), second partition is reserved for result
  * descriptor ring (1K), and the remaining 14K are reserved for vector data.
  * Through this memroy partition scheme, command/result descriptor rings hold
@@ -460,7 +487,7 @@ mlxbf_pka_dev_write_ring_info(struct mlxbf_pka_dev_res_t *buffer_ram_ptr,
 	ring_spacing = ring_id * MLXBF_PKA_RING_WORDS_SPACING;
 
 	/*
-	 * Write the command ring base address  that  the  EIP-154
+	 * Write the command ring base address that the EIP-154
 	 * master firmware uses with the command ring read pointer
 	 * to get command descriptors from the Host ring. After the
 	 * initialization, although the word is writeable it should
@@ -474,10 +501,10 @@ mlxbf_pka_dev_write_ring_info(struct mlxbf_pka_dev_res_t *buffer_ram_ptr,
 			       ring_cmmd_base_val);
 
 	/*
-	 * Write the result  ring base address  that  the  EIP-154
+	 * Write the result ring base address that the EIP-154
 	 * master firmware uses with the result ring write pointer
-	 * to put the result descriptors in the Host ring.   After
-	 * the initialization,  although the word is writeable  it
+	 * to put the result descriptors in the Host ring. After
+	 * the initialization, although the word is writeable  it
 	 * should be regarded as read-only.
 	 */
 	word_off = mlxbf_pka_dev_get_word_offset(
@@ -490,7 +517,7 @@ mlxbf_pka_dev_write_ring_info(struct mlxbf_pka_dev_res_t *buffer_ram_ptr,
 	/*
 	 * Write the ring size (number of descriptors), the size of
 	 * the descriptor and the result reporting scheme. After the
-	 * initialization,  although the word is writeable it should
+	 * initialization, although the word is writeable it should
 	 * be regarded as read-only.
 	 */
 	word_off = mlxbf_pka_dev_get_word_offset(
@@ -501,9 +528,9 @@ mlxbf_pka_dev_write_ring_info(struct mlxbf_pka_dev_res_t *buffer_ram_ptr,
 			       ring_size_type_val);
 
 	/*
-	 * Write the command and result ring indices that the  EIP-154
+	 * Write the command and result ring indices that the EIP-154
 	 * master firmware uses. This word should be written with zero
-	 * when the ring information is initialized.  After the
+	 * when the ring information is initialized. After the
 	 * initialization, although the word is writeable it should be
 	 * regarded as read-only.
 	 */
@@ -514,10 +541,10 @@ mlxbf_pka_dev_write_ring_info(struct mlxbf_pka_dev_res_t *buffer_ram_ptr,
 	mlxbf_pka_dev_io_write(buffer_ram_ptr->ioaddr, word_off, 0);
 
 	/*
-	 * Write the ring statistics   (two 16-bit counters,  one for
+	 * Write the ring statistics (two 16-bit counters, one for
 	 * commands and one for results) from EIP-154 master firmware
-	 * point of view.  This word should be written with zero when
-	 * the ring information is initialized.  After the initializa-
+	 * point of view. This word should be written with zero when
+	 * the ring information is initialized. After the initializa-
 	 * -tion, although the word is writeable it should be regarded
 	 * as read-only.
 	 */
@@ -639,7 +666,6 @@ static int mlxbf_pka_dev_create_shim(struct mlxbf_pka_dev_shim_t *shim,
 	shim->rings = kcalloc(shim->rings_num,
 			      sizeof(struct mlxbf_pka_dev_ring_t), GFP_KERNEL);
 	if (!shim->rings) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DEV, "unable to kmalloc\n");
 		kfree(shim->rings);
 		return -ENOMEM;
 	}
@@ -1182,8 +1208,7 @@ static int mlxbf_pka_dev_init_shim(struct mlxbf_pka_dev_shim_t *shim)
 	int ret;
 
 	if (shim->status != MLXBF_PKA_SHIM_STATUS_CREATED) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DEV,
-				"MLXBF_PKA device must be created\n");
+		MLXBF_PKA_ERROR(MLXBF_PKA_DEV, "MLXBF_PKA device must be created\n");
 		return -EPERM;
 	}
 
@@ -1217,8 +1242,7 @@ static int mlxbf_pka_dev_init_shim(struct mlxbf_pka_dev_shim_t *shim)
 		shim, &shim->resources.master_seq_ctrl);
 	if (ret) {
 		MLXBF_PKA_ERROR(
-			MLXBF_PKA_DEV,
-			"failed to configure Master controller Sequencer\n");
+			MLXBF_PKA_DEV, "failed to configure Master controller Sequencer\n");
 		return ret;
 	}
 
@@ -1629,11 +1653,17 @@ bool mlxbf_pka_dev_has_trng(struct mlxbf_pka_dev_shim_t *shim)
 }
 
 /* Open ring. */
-int mlxbf_pka_dev_open_ring(u32 ring_id)
+int mlxbf_pka_dev_open_ring(struct mlxbf_pka_ring_info_t *ring_info)
 {
 	struct mlxbf_pka_dev_shim_t *shim;
 	struct mlxbf_pka_dev_ring_t *ring;
+	u32 ring_id;
 	int ret;
+
+	if(!ring_info)
+		return -EINVAL;
+
+	ring_id = ring_info->ring_id;
 
 	if (!mlxbf_pka_gbl_config.dev_rings_cnt)
 		return -EPERM;
@@ -1670,29 +1700,34 @@ int mlxbf_pka_dev_open_ring(u32 ring_id)
 }
 
 /* Close ring. */
-int mlxbf_pka_dev_close_ring(u32 ring_id)
+int mlxbf_pka_dev_close_ring(struct mlxbf_pka_ring_info_t *ring_info)
 {
 	struct mlxbf_pka_dev_shim_t *shim;
 	struct mlxbf_pka_dev_ring_t *ring;
+	u32 ring_id;
 
-	if (!mlxbf_pka_gbl_config.dev_rings_cnt)
-		return -EPERM;
+	if (ring_info) {
+		ring_id = ring_info->ring_id;
 
-	ring = mlxbf_pka_dev_get_ring(ring_id);
-	if (!ring || !ring->shim)
-		return -ENXIO;
+		if (!mlxbf_pka_gbl_config.dev_rings_cnt)
+			return -EPERM;
 
-	shim = ring->shim;
+		ring = mlxbf_pka_dev_get_ring(ring_id);
+		if (!ring || !ring->shim)
+			return -ENXIO;
 
-	if (shim->status != MLXBF_PKA_SHIM_STATUS_RUNNING &&
-	    ring->status != MLXBF_PKA_DEV_RING_STATUS_BUSY)
-		return -EPERM;
+		shim = ring->shim;
 
-	ring->status = MLXBF_PKA_DEV_RING_STATUS_INITIALIZED;
-	shim->busy_ring_num -= 1;
+		if (shim->status != MLXBF_PKA_SHIM_STATUS_RUNNING &&
+		    ring->status != MLXBF_PKA_DEV_RING_STATUS_BUSY)
+			return -EPERM;
 
-	if (!shim->busy_ring_num)
-		shim->status = MLXBF_PKA_SHIM_STATUS_STOPPED;
+		ring->status = MLXBF_PKA_DEV_RING_STATUS_INITIALIZED;
+		shim->busy_ring_num -= 1;
+
+		if (!shim->busy_ring_num)
+			shim->status = MLXBF_PKA_SHIM_STATUS_STOPPED;
+	}
 
 	return 0;
 }

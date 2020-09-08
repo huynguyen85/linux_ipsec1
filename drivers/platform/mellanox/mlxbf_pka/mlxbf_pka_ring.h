@@ -176,6 +176,73 @@ struct mlxbf_pka_ring_hw_rslt_desc_t {
 	u64 rsvd_9;
 };
 
+/**
+ * mlxbf_pka_ring_desc_t - Structure for PKA command and result ring
+ * as used by hardware.
+ * @num_descs: total number of descriptors in the ring.
+ * @cmd_ring_base: base address of the command ring.
+ * @cmd_idx: index of the command in a ring.
+ * @rslt_ring_base: base address of the result ring.
+ * @rslt_idx: index of the result in a ring.
+ * @operands_base: operands memory base address.
+ * @operands_end: end address of operands memory.
+ * @desc_size: size of each element in the ring.
+ * @cmd_desc_mask: bitmask of free(0)/in_use(1) cmd descriptors.
+ * @cmd_desc_cnt: number of command descriptors currently in use.
+ * @rslt_desc_cnt: number of result descriptors currently ready.
+ */
+struct mlxbf_pka_ring_desc_t {
+	u32 num_descs;
+	u32 cmd_ring_base;
+	u32 cmd_idx;
+	u32 rslt_ring_base;
+	u32 rslt_idx;
+	u32 operands_base;
+	u32 operands_end;
+	u32 desc_size;
+	u64 cmd_desc_mask;
+	u32 cmd_desc_cnt;
+	u32 rslt_desc_cnt;
+};
+
+/**
+ * mlxbf_pka_ring_info_t - Structure for ring parameters
+ * @fd:
+ * @group: iommu group.
+ * @container: vfio cointainer.
+ * @idx:
+ * @ring_id: hardware ring identifier.
+ * @mem_off: offset specific to window RAM region.
+ * @mem_addr: window RAM region address.
+ * @mem_size: window RAM region size.
+ * @reg_off: offset specific to count registers region.
+ * @reg_addr: count registers region address.
+ * @reg_size: count registers region size.
+ * @mem_ptr: pointer to map-ped memory region.
+ * @reg_ptr: pointer to map-ped counters region.
+ * @ring_desc: ring descriptor.
+ * @stats:
+ * @big_endian:
+ */
+struct mlxbf_pka_ring_info_t {
+	int fd;
+	int group;
+	int container;
+	u32 idx;
+	u32 ring_id;
+	u64 mem_off;
+	u64 mem_addr;
+	u64 mem_size;
+	u64 reg_off;
+	u64 reg_addr;
+	u64 reg_size;
+	void *mem_ptr;
+	void *reg_ptr;
+	struct mlxbf_pka_ring_desc_t ring_desc;
+	u8 big_endian;
+};
+
+
 #define MLXBF_PKA_RESULT_DESC_SIZE sizeof(struct mlxbf_pka_ring_hw_rslt_desc_t)
 
 #endif /* __MLXBF_PKA_RING_H__ */

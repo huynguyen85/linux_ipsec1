@@ -65,10 +65,15 @@
 /*
  * PKA Master Sequencer Control/Status Register
  * Write '1' to bit [31] puts the Master controller Sequencer in a reset
- * reset state. Resetting the Sequencer (in order to load other firmware)
+ * state. Resetting the Sequencer (in order to load other firmware)
  * should only be done when the EIP-154 is not performing any operations.
  */
 #define MLXBF_PKA_MASTER_SEQ_CTRL_RESET_VAL BIT(31)
+/* Write '1' to bit [30] will reset all Command and Result counters. This
+ * bit is write-only and self clearing and can only be set if the ‘Reset’
+ * bit [31] is ‘1’.
+ */
+#define MLXBF_PKA_MASTER_SEQ_CTRL_CLEAR_COUNTERS_VAL BIT(30)
 /*
  * Bit [8] in the PKA Master Sequencer Control/Status Register is tied to
  * the 'mlxbf_pka_master_irq interrupt' on the EIP-154 interrupt controller.

@@ -1,10 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only OR Linux-OpenIB
-
-/*
- * Mellanox Public Key Accelerator (MLXBF_PKA) driver
- *
- * Copyright (c) 2020 NVIDIA Corporation. All rights reserved.
- */
+// SPDX-License-Identifier: GPL-2.0 or BSD-3-Clause
 
 #include <linux/acpi.h>
 #include <linux/cdev.h>
@@ -25,274 +19,269 @@
 
 #include "mlxbf_pka_dev.h"
 
-#define MLXBF_PKA_DRIVER_VERSION "v2.0"
-#define MLXBF_PKA_DRIVER_NAME "pka-mlxbf"
 
-#define MLXBF_PKA_DRIVER_DESCRIPTION "BlueField PKA driver"
+#define PKA_DRIVER_VERSION      "v2.0"
+#define PKA_DRIVER_NAME         "pka-mlxbf"
 
-#define MLXBF_PKA_DEVICE_COMPAT "mlx,mlxbf-pka"
-#define MLXBF_PKA_RING_DEVICE_COMPAT "mlx,mlxbf-pka-ring"
+#define PKA_DRIVER_DESCRIPTION  "BlueField PKA driver"
 
-#define MLXBF_PKA_DEVICE_ACPIHID "MLNXBF10"
-#define MLXBF_PKA_RING_DEVICE_ACPIHID "MLNXBF11"
+#define PKA_DEVICE_COMPAT       "mlx,mlxbf-pka"
+#define PKA_RING_DEVICE_COMPAT	"mlx,mlxbf-pka-ring"
 
-static DEFINE_MUTEX(mlxbf_pka_drv_lock);
+#define PKA_DEVICE_ACPIHID      "MLNXBF10"
+#define PKA_RING_DEVICE_ACPIHID "MLNXBF11"
 
-static u32 mlxbf_pka_device_cnt;
-static u32 mlxbf_pka_ring_device_cnt;
+static DEFINE_MUTEX(pka_drv_lock);
 
-static const char mlxbf_pka_compat[] = MLXBF_PKA_DEVICE_COMPAT;
-static const char mlxbf_pka_ring_compat[] = MLXBF_PKA_RING_DEVICE_COMPAT;
+static uint32_t pka_device_cnt;
+static uint32_t pka_ring_device_cnt;
 
-static const char mlxbf_pka_acpihid[] = MLXBF_PKA_DEVICE_ACPIHID;
-static const char mlxbf_pka_ring_acpihid[] = MLXBF_PKA_RING_DEVICE_ACPIHID;
+const char pka_compat[]      = PKA_DEVICE_COMPAT;
+const char pka_ring_compat[] = PKA_RING_DEVICE_COMPAT;
 
-struct mlxbf_pka_info {
-	struct device *dev;
-	const char *name;
-	const char *version;
-	const char *compat;
-	const char *acpihid;
-	u8 flag;
+const char pka_acpihid[]      = PKA_DEVICE_ACPIHID;
+const char pka_ring_acpihid[] = PKA_RING_DEVICE_ACPIHID;
+
+struct pka_info {
+	struct device *dev;	/* the device this info belongs to */
+	const char    *name;	/* device name */
+	const char    *version;	/* device driver version */
+	const char    *compat;
+	const char    *acpihid;
+	uint8_t        flag;
 	struct module *module;
-	void *priv;
+	void          *priv;	/* optional private data */
 };
 
-/* defines for mlxbf_pka_info->flags */
-#define MLXBF_PKA_DRIVER_FLAG_RING_DEVICE 1
-#define MLXBF_PKA_DRIVER_FLAG_DEVICE 2
+/* defines for pka_info->flags */
+#define PKA_DRIVER_FLAG_RING_DEVICE        1
+#define PKA_DRIVER_FLAG_DEVICE             2
 
-enum {  MLXBF_PKA_REVISION_1 = 1,
-	MLXBF_PKA_REVISION_2,
+enum {
+	PKA_REVISION_1 = 1,
+	PKA_REVISION_2,
 };
 
-struct mlxbf_pka_platdata {
+struct pka_platdata {
 	struct platform_device *pdev;
-	struct mlxbf_pka_info *info;
-	spinlock_t lock;
-	unsigned long irq_flags;
+	struct pka_info  *info;
+	spinlock_t        lock;
+	unsigned long     irq_flags;
 };
 
-/* Bits in mlxbf_pka_platdata.irq_flags */
-enum { MLXBF_PKA_IRQ_DISABLED = 0,
+/* Bits in pka_platdata.irq_flags */
+enum {
+	PKA_IRQ_DISABLED = 0,
 };
 
-struct mlxbf_pka_ring_region {
-	u64 off;
-	u64 addr;
+struct pka_ring_region {
+	u64             off;
+	u64             addr;
 	resource_size_t size;
-	u32 flags;
-	u32 type;
-	void __iomem *ioaddr;
+	u32             flags;
+	u32             type;
+	void __iomem   *ioaddr;
 };
 
 /* defines for pka_ring_region->flags */
-#define MLXBF_PKA_RING_REGION_FLAG_READ BIT(0) /* Region supports read */
-#define MLXBF_PKA_RING_REGION_FLAG_WRITE BIT(1) /* Region supports write */
-#define MLXBF_PKA_RING_REGION_FLAG_MMAP BIT(2) /* Region supports mmap */
+#define PKA_RING_REGION_FLAG_READ      (1 << 0) /* Region supports read */
+#define PKA_RING_REGION_FLAG_WRITE     (1 << 1) /* Region supports write */
+#define PKA_RING_REGION_FLAG_MMAP      (1 << 2) /* Region supports mmap */
 
-/* defines for mlxbf_pka_ring_region->type */
-#define MLXBF_PKA_RING_RES_TYPE_NONE 0
-#define MLXBF_PKA_RING_RES_TYPE_WORDS BIT(0) /* info control/status words */
-#define MLXBF_PKA_RING_RES_TYPE_CNTRS BIT(1) /* count registers */
-#define MLXBF_PKA_RING_RES_TYPE_MEM BIT(2) /* window RAM region */
+/* defines for pka_ring_region->type */
+#define PKA_RING_RES_TYPE_NONE      0
+#define PKA_RING_RES_TYPE_WORDS     1	/* info control/status words */
+#define PKA_RING_RES_TYPE_CNTRS     2	/* count registers */
+#define PKA_RING_RES_TYPE_MEM       4	/* window RAM region */
 
-#define MLXBF_PKA_DRIVER_RING_DEV_MAX MLXBF_PKA_MAX_NUM_RINGS
+#define PKA_DRIVER_RING_DEV_MAX     PKA_MAX_NUM_RINGS
 
-struct mlxbf_pka_ring_device {
-	struct mlxbf_pka_info *info;
-	struct device *device;
+struct pka_ring_device {
+	struct pka_info    *info;
+	struct device      *device;
 	struct iommu_group *group;
-	s32 group_id;
-	u32 device_id;
-	u32 parent_device_id;
-	struct mutex mutex;
-	u32 flags;
-	struct module *parent_module;
-	struct mlxbf_pka_dev_ring_t *ring;
-	int minor;
-	u32 num_regions;
-	struct mlxbf_pka_ring_region *regions;
+	int32_t             group_id;
+	uint32_t            device_id;
+	uint32_t            parent_device_id;
+	struct mutex        mutex;
+	uint32_t            flags;
+	struct module      *parent_module;
+	pka_dev_ring_t     *ring;
+	int                 minor;
+	uint32_t            num_regions;
+	struct pka_ring_region *regions;
 };
 
-#define MLXBF_PKA_DRIVER_DEV_MAX MLXBF_PKA_MAX_NUM_IO_BLOCKS
-#define MLXBF_PKA_DRIVER_RING_NUM_REGIONS_MAX MLXBF_PKA_MAX_NUM_RING_RESOURCES
+#define PKA_DRIVER_DEV_MAX                PKA_MAX_NUM_IO_BLOCKS
+#define PKA_DRIVER_RING_NUM_REGIONS_MAX   PKA_MAX_NUM_RING_RESOURCES
 
 /* defines for region index */
-enum {	MLXBF_PKA_RING_REGION_WORDS_IDX = 0,
-	MLXBF_PKA_RING_REGION_CNTRS_IDX,
-	MLXBF_PKA_RING_REGION_MEM_IDX,
-};
+#define PKA_RING_REGION_WORDS_IDX         0
+#define PKA_RING_REGION_CNTRS_IDX         1
+#define PKA_RING_REGION_MEM_IDX           2
 
-#define MLXBF_PKA_RING_REGION_OFFSET_SHIFT 40
-#define MLXBF_PKA_RING_REGION_OFFSET_MASK                                      \
-	(((u64)(1) << MLXBF_PKA_RING_REGION_OFFSET_SHIFT) - 1)
+#define PKA_RING_REGION_OFFSET_SHIFT   40
+#define PKA_RING_REGION_OFFSET_MASK    \
+	(((u64)(1) << PKA_RING_REGION_OFFSET_SHIFT) - 1)
 
-#define MLXBF_PKA_RING_OFFSET_TO_INDEX(off)                                    \
-	((off) >> MLXBF_PKA_RING_REGION_OFFSET_SHIFT)
+#define PKA_RING_OFFSET_TO_INDEX(off)   \
+	(off >> PKA_RING_REGION_OFFSET_SHIFT)
 
-#define MLXBF_PKA_RING_REGION_INDEX_TO_OFFSET(index)                           \
-	((u64)(index) << MLXBF_PKA_RING_REGION_OFFSET_SHIFT)
+#define PKA_RING_REGION_INDEX_TO_OFFSET(index) \
+	((u64)(index) << PKA_RING_REGION_OFFSET_SHIFT)
 
-struct mlxbf_pka_device {
-	struct mlxbf_pka_info *info;
-	struct device *device;
-	u32 device_id;
-	u8 fw_id;
-	struct mutex mutex;
+struct pka_device {
+	struct pka_info *info;
+	struct device   *device;
+	uint32_t         device_id;
+	uint8_t          fw_id;         /* firmware identifier */
+	struct mutex     mutex;
 	struct resource *resource;
-	struct mlxbf_pka_dev_shim_t *shim;
-	long irq;
-	struct hwrng rng;
+	pka_dev_shim_t  *shim;
+	long             irq;		/* interrupt number */
+	struct hwrng     rng;
 };
 
-/* defines for mlxbf_pka_device->irq */
-#define MLXBF_PKA_IRQ_CUSTOM -1
-#define MLXBF_PKA_IRQ_NONE 0
+/* defines for pka_device->irq */
+#define PKA_IRQ_CUSTOM          -1
+#define PKA_IRQ_NONE             0
 
 /* Hardware interrupt handler */
-static irqreturn_t mlxbf_pka_drv_irq_handler(int irq, void *device)
+static irqreturn_t pka_drv_irq_handler(int irq, void *device)
 {
-	struct mlxbf_pka_device *mlxbf_pka_dev =
-		(struct mlxbf_pka_device *)device;
-	struct platform_device *pdev =
-		to_platform_device(mlxbf_pka_dev->device);
-	struct mlxbf_pka_platdata *priv = platform_get_drvdata(pdev);
+	struct pka_device      *pka_dev = (struct pka_device *)device;
+	struct platform_device *pdev = to_platform_device(pka_dev->device);
+	struct pka_platdata    *priv = platform_get_drvdata(pdev);
 
-	MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER, "handle irq in device %u\n",
-			mlxbf_pka_dev->device_id);
+	PKA_DEBUG(PKA_DRIVER,
+		  "handle irq in device %u\n", pka_dev->device_id);
 
 	/* Just disable the interrupt in the interrupt controller */
 
 	spin_lock(&priv->lock);
-	if (!__test_and_set_bit(MLXBF_PKA_IRQ_DISABLED, &priv->irq_flags))
+	if (!__test_and_set_bit(PKA_IRQ_DISABLED, &priv->irq_flags))
 		disable_irq_nosync(irq);
 	spin_unlock(&priv->lock);
 
 	return IRQ_HANDLED;
 }
 
-static int mlxbf_pka_drv_register_irq(struct mlxbf_pka_device *mlxbf_pka_dev)
+static int pka_drv_register_irq(struct pka_device *pka_dev)
 {
-	if (mlxbf_pka_dev->irq &&
-	    mlxbf_pka_dev->irq != MLXBF_PKA_IRQ_CUSTOM) {
+	if (pka_dev->irq && (pka_dev->irq != PKA_IRQ_CUSTOM)) {
 		/*
 		 * Allow sharing the irq among several devices (child devices
 		 * so far)
 		 */
-		return request_irq(mlxbf_pka_dev->irq,
-				   (irq_handler_t)mlxbf_pka_drv_irq_handler,
-				   IRQF_SHARED, mlxbf_pka_dev->info->name,
-				   mlxbf_pka_dev);
+		return request_irq(pka_dev->irq,
+				   (irq_handler_t) pka_drv_irq_handler,
+				   IRQF_SHARED, pka_dev->info->name,
+				   pka_dev);
 	}
 
 	return -ENXIO;
 }
 
-static int
-mlxbf_pka_drv_ring_regions_init(struct mlxbf_pka_ring_device *ring_dev)
+static int pka_drv_ring_regions_init(struct pka_ring_device *ring_dev)
 {
-	struct mlxbf_pka_ring_region *region;
-	struct mlxbf_pka_dev_ring_t *ring;
-	struct mlxbf_pka_dev_res_t *res;
-	u32 num_regions;
-	u64 shim_base;
+	struct pka_ring_region *region;
+	pka_dev_ring_t *ring;
+	pka_dev_res_t  *res;
+	uint64_t        shim_base;
+	uint32_t        num_regions;
 
 	ring = ring_dev->ring;
 	if (!ring || !ring->shim)
 		return -ENXIO;
 
-	num_regions = ring->resources_num;
+	num_regions           = ring->resources_num;
 	ring_dev->num_regions = num_regions;
-	ring_dev->regions = kcalloc(
-		num_regions, sizeof(struct mlxbf_pka_ring_region), GFP_KERNEL);
+	ring_dev->regions     = kcalloc(num_regions,
+					sizeof(struct pka_ring_region),
+					GFP_KERNEL);
 	if (!ring_dev->regions)
 		return -ENOMEM;
 
 	shim_base = ring->shim->base;
 
 	/* Information words region */
-	res = &ring->resources.info_words;
-	region = &ring_dev->regions[MLXBF_PKA_RING_REGION_WORDS_IDX];
+	res    = &ring->resources.info_words;
+	region = &ring_dev->regions[PKA_RING_REGION_WORDS_IDX];
 	/* map offset to the physical address */
-	region->off =
-		MLXBF_PKA_RING_REGION_INDEX_TO_OFFSET(MLXBF_PKA_RING_REGION_WORDS_IDX);
-	region->addr = res->base + shim_base;
-	region->size = res->size;
-	region->type = MLXBF_PKA_RING_RES_TYPE_WORDS;
-	region->flags |=
-		(MLXBF_PKA_RING_REGION_FLAG_MMAP |
-		 MLXBF_PKA_RING_REGION_FLAG_READ |
-		 MLXBF_PKA_RING_REGION_FLAG_WRITE);
+	region->off    =
+		PKA_RING_REGION_INDEX_TO_OFFSET(PKA_RING_REGION_WORDS_IDX);
+	region->addr   = res->base + shim_base;
+	region->size   = res->size;
+	region->type   = PKA_RING_RES_TYPE_WORDS;
+	region->flags |= (PKA_RING_REGION_FLAG_MMAP |
+			  PKA_RING_REGION_FLAG_READ |
+			  PKA_RING_REGION_FLAG_WRITE);
 
-	/* Count registers region */
-	res = &ring->resources.counters;
-	region = &ring_dev->regions[MLXBF_PKA_RING_REGION_CNTRS_IDX];
+	/* Count regiters region */
+	res    = &ring->resources.counters;
+	region = &ring_dev->regions[PKA_RING_REGION_CNTRS_IDX];
 	/* map offset to the physical address */
-	region->off =
-		MLXBF_PKA_RING_REGION_INDEX_TO_OFFSET(MLXBF_PKA_RING_REGION_CNTRS_IDX);
-	region->addr = res->base + shim_base;
-	region->size = res->size;
-	region->type = MLXBF_PKA_RING_RES_TYPE_CNTRS;
-	region->flags |=
-		(MLXBF_PKA_RING_REGION_FLAG_MMAP |
-		 MLXBF_PKA_RING_REGION_FLAG_READ |
-		 MLXBF_PKA_RING_REGION_FLAG_WRITE);
+	region->off    =
+		PKA_RING_REGION_INDEX_TO_OFFSET(PKA_RING_REGION_CNTRS_IDX);
+	region->addr   = res->base + shim_base;
+	region->size   = res->size;
+	region->type   = PKA_RING_RES_TYPE_CNTRS;
+	region->flags |= (PKA_RING_REGION_FLAG_MMAP |
+			  PKA_RING_REGION_FLAG_READ |
+			  PKA_RING_REGION_FLAG_WRITE);
 
 	/* Window ram region */
-	res = &ring->resources.window_ram;
-	region = &ring_dev->regions[MLXBF_PKA_RING_REGION_MEM_IDX];
+	res    = &ring->resources.window_ram;
+	region = &ring_dev->regions[PKA_RING_REGION_MEM_IDX];
 	/* map offset to the physical address */
-	region->off =
-		MLXBF_PKA_RING_REGION_INDEX_TO_OFFSET(MLXBF_PKA_RING_REGION_MEM_IDX);
-	region->addr = res->base + shim_base;
-	region->size = res->size;
-	region->type = MLXBF_PKA_RING_RES_TYPE_MEM;
-	region->flags |=
-		(MLXBF_PKA_RING_REGION_FLAG_MMAP |
-		 MLXBF_PKA_RING_REGION_FLAG_READ |
-		 MLXBF_PKA_RING_REGION_FLAG_WRITE);
+	region->off    =
+		PKA_RING_REGION_INDEX_TO_OFFSET(PKA_RING_REGION_MEM_IDX);
+	region->addr   = res->base + shim_base;
+	region->size   = res->size;
+	region->type   = PKA_RING_RES_TYPE_MEM;
+	region->flags |= (PKA_RING_REGION_FLAG_MMAP |
+			  PKA_RING_REGION_FLAG_READ |
+			  PKA_RING_REGION_FLAG_WRITE);
 
 	return 0;
 }
 
-static void
-mlxbf_pka_drv_ring_regions_cleanup(struct mlxbf_pka_ring_device *ring_dev)
+static void pka_drv_ring_regions_cleanup(struct pka_ring_device *ring_dev)
 {
-	/* clear ring device regions */
+	/* clear vfio device regions */
 	ring_dev->num_regions = 0;
 	kfree(ring_dev->regions);
 }
 
-static int mlxbf_pka_drv_ring_open(void *device_data)
+static int pka_drv_ring_open(void *device_data)
 {
-	struct mlxbf_pka_ring_device *ring_dev = device_data;
-	struct mlxbf_pka_info *info = ring_dev->info;
-	struct mlxbf_pka_ring_info_t ring_info;
+	struct pka_ring_device *ring_dev = device_data;
+	struct pka_info        *info     = ring_dev->info;
+	pka_ring_info_t         ring_info;
+
 	int error;
 
-	MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-			"open ring device %u (device_data:%p)\n",
-			ring_dev->device_id, ring_dev);
+	PKA_DEBUG(PKA_DRIVER,
+		  "open ring device %u (device_data:%p)\n",
+		  ring_dev->device_id, ring_dev);
 
 	if (!try_module_get(info->module))
 		return -ENODEV;
 
 	/* Initialize regions */
-	error = mlxbf_pka_drv_ring_regions_init(ring_dev);
+	error = pka_drv_ring_regions_init(ring_dev);
 	if (error) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER,
-				"failed to initialize regions\n");
+		PKA_ERROR(PKA_DRIVER, "failed to initialize regions\n");
 		module_put(info->module);
 		return error;
 	}
 
 	ring_info.ring_id = ring_dev->device_id;
-	error = mlxbf_pka_dev_open_ring(&ring_info);
+	error = pka_dev_open_ring(&ring_info);
 	if (error) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER, "failed to open ring %u\n",
-				ring_dev->device_id);
-		mlxbf_pka_drv_ring_regions_cleanup(ring_dev);
+		PKA_ERROR(PKA_DRIVER,
+			  "failed to open ring %u\n", ring_dev->device_id);
+		pka_drv_ring_regions_cleanup(ring_dev);
 		module_put(info->module);
 		return error;
 	}
@@ -300,35 +289,37 @@ static int mlxbf_pka_drv_ring_open(void *device_data)
 	return 0;
 }
 
-static void mlxbf_pka_drv_ring_release(void *device_data)
+static void pka_drv_ring_release(void *device_data)
 {
-	struct mlxbf_pka_ring_device *ring_dev = device_data;
-	struct mlxbf_pka_info *info = ring_dev->info;
-	struct mlxbf_pka_ring_info_t ring_info;
+	struct pka_ring_device *ring_dev = device_data;
+	struct pka_info        *info = ring_dev->info;
+	pka_ring_info_t         ring_info;
+
 	int error;
 
-	MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-			"release ring device %u (device_data:%p)\n",
-			ring_dev->device_id, ring_dev);
+	PKA_DEBUG(PKA_DRIVER,
+		  "release ring device %u (device_data:%p)\n",
+		  ring_dev->device_id, ring_dev);
 
 	ring_info.ring_id = ring_dev->device_id;
-	error = mlxbf_pka_dev_close_ring(&ring_info);
+	error = pka_dev_close_ring(&ring_info);
 	if (error)
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER, "failed to close ring %u\n",
-				ring_dev->device_id);
+		PKA_ERROR(PKA_DRIVER,
+			  "failed to close ring %u\n",
+			  ring_dev->device_id);
 
-	mlxbf_pka_drv_ring_regions_cleanup(ring_dev);
+	pka_drv_ring_regions_cleanup(ring_dev);
 	module_put(info->module);
 }
 
-static int mlxbf_pka_drv_ring_mmap_region(struct mlxbf_pka_ring_region region,
-					  struct vm_area_struct *vma)
+static int pka_drv_ring_mmap_region(struct pka_ring_region region,
+				    struct vm_area_struct *vma)
 {
 	u64 req_len, pgoff, req_start;
 
 	req_len = vma->vm_end - vma->vm_start;
-	pgoff = vma->vm_pgoff &
-		((1U << (MLXBF_PKA_RING_REGION_OFFSET_SHIFT - PAGE_SHIFT)) - 1);
+	pgoff   = vma->vm_pgoff &
+		((1U << (PKA_RING_REGION_OFFSET_SHIFT - PAGE_SHIFT)) - 1);
 	req_start = pgoff << PAGE_SHIFT;
 
 	region.size = roundup(region.size, PAGE_SIZE);
@@ -337,24 +328,21 @@ static int mlxbf_pka_drv_ring_mmap_region(struct mlxbf_pka_ring_region region,
 		return -EINVAL;
 
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	vma->vm_pgoff = (region.addr >> PAGE_SHIFT) + pgoff;
+	vma->vm_pgoff     = (region.addr >> PAGE_SHIFT) + pgoff;
 
-	return remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff, req_len,
-			       vma->vm_page_prot);
+	return remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
+					req_len, vma->vm_page_prot);
 }
 
-static int mlxbf_pka_drv_ring_mmap(void *device_data,
-				   struct vm_area_struct *vma)
+static int pka_drv_ring_mmap(void *device_data, struct vm_area_struct *vma)
 {
-	struct mlxbf_pka_ring_device *ring_dev = device_data;
-	struct mlxbf_pka_ring_region *region;
-	unsigned int index;
+	struct pka_ring_device *ring_dev = device_data;
+	struct pka_ring_region *region;
+	unsigned int            index;
 
-	MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER, "mmap device %u\n",
-			ring_dev->device_id);
+	PKA_DEBUG(PKA_DRIVER, "mmap device %u\n", ring_dev->device_id);
 
-	index = vma->vm_pgoff >>
-		(MLXBF_PKA_RING_REGION_OFFSET_SHIFT - PAGE_SHIFT);
+	index = vma->vm_pgoff >> (PKA_RING_REGION_OFFSET_SHIFT - PAGE_SHIFT);
 
 	if (vma->vm_end < vma->vm_start)
 		return -EINVAL;
@@ -369,25 +357,24 @@ static int mlxbf_pka_drv_ring_mmap(void *device_data,
 
 	region = &ring_dev->regions[index];
 
-	if (!(region->flags & MLXBF_PKA_RING_REGION_FLAG_MMAP))
+	if (!(region->flags & PKA_RING_REGION_FLAG_MMAP))
 		return -EINVAL;
 
-	if (!(region->flags & MLXBF_PKA_RING_REGION_FLAG_READ) &&
-	    (vma->vm_flags & VM_READ))
+	if (!(region->flags & PKA_RING_REGION_FLAG_READ)
+	    && (vma->vm_flags & VM_READ))
 		return -EINVAL;
 
-	if (!(region->flags & MLXBF_PKA_RING_REGION_FLAG_WRITE) &&
-	    (vma->vm_flags & VM_WRITE))
+	if (!(region->flags & PKA_RING_REGION_FLAG_WRITE)
+	    && (vma->vm_flags & VM_WRITE))
 		return -EINVAL;
 
 	vma->vm_private_data = ring_dev;
 
-	if (region->type & MLXBF_PKA_RING_RES_TYPE_CNTRS ||
-	    region->type & MLXBF_PKA_RING_RES_TYPE_MEM)
-		return mlxbf_pka_drv_ring_mmap_region(ring_dev->regions[index],
-						      vma);
+	if (region->type & PKA_RING_RES_TYPE_CNTRS ||
+	    region->type & PKA_RING_RES_TYPE_MEM)
+		return pka_drv_ring_mmap_region(ring_dev->regions[index], vma);
 
-	if (region->type & MLXBF_PKA_RING_RES_TYPE_WORDS)
+	if (region->type & PKA_RING_RES_TYPE_WORDS)
 		/*
 		 * Currently user space is not allowed to access this
 		 * region.
@@ -397,55 +384,140 @@ static int mlxbf_pka_drv_ring_mmap(void *device_data,
 	return -EINVAL;
 }
 
-static long mlxbf_pka_drv_ring_ioctl(void *device_data, unsigned int cmd,
-				 unsigned long arg)
+static long pka_drv_ring_ioctl(void *device_data,
+			   unsigned int cmd, unsigned long arg)
 {
-	struct mlxbf_pka_ring_device *ring_dev = device_data;
+	struct pka_ring_device *ring_dev = device_data;
+
 	int error = -ENOTTY;
 
-	if (cmd == MLXBF_PKA_RING_GET_REGION_INFO) {
-		struct mlxbf_pka_dev_region_info_t info;
+	if (cmd == PKA_RING_GET_REGION_INFO) {
+		pka_dev_region_info_t info;
 
-		info.mem_index = MLXBF_PKA_RING_REGION_MEM_IDX;
+		info.mem_index  = PKA_RING_REGION_MEM_IDX;
 		info.mem_offset = ring_dev->regions[info.mem_index].off;
-		info.mem_size = ring_dev->regions[info.mem_index].size;
+		info.mem_size   = ring_dev->regions[info.mem_index].size;
 
-		info.reg_index = MLXBF_PKA_RING_REGION_CNTRS_IDX;
+		info.reg_index  = PKA_RING_REGION_CNTRS_IDX;
 		info.reg_offset = ring_dev->regions[info.reg_index].off;
-		info.reg_size = ring_dev->regions[info.reg_index].size;
+		info.reg_size   = ring_dev->regions[info.reg_index].size;
 
 		return copy_to_user((void __user *)arg, &info, sizeof(info)) ?
-			       -EFAULT :
-			       0;
+			-EFAULT : 0;
 
-	} else if (cmd == MLXBF_PKA_GET_RING_INFO) {
-		struct mlxbf_pka_dev_hw_ring_info_t *this_ring_info;
-		struct mlxbf_pka_dev_hw_ring_info_t hw_ring_info;
+	} else if (cmd == PKA_GET_RING_INFO) {
+		pka_dev_hw_ring_info_t *this_ring_info;
+		pka_dev_hw_ring_info_t  hw_ring_info;
 
 		this_ring_info = ring_dev->ring->ring_info;
 
-		hw_ring_info.cmmd_base = this_ring_info->cmmd_base;
-		hw_ring_info.rslt_base = this_ring_info->rslt_base;
-		hw_ring_info.size = this_ring_info->size;
+		hw_ring_info.cmmd_base      = this_ring_info->cmmd_base;
+		hw_ring_info.rslt_base      = this_ring_info->rslt_base;
+		hw_ring_info.size           = this_ring_info->size;
 		hw_ring_info.host_desc_size = this_ring_info->host_desc_size;
-		hw_ring_info.in_order = this_ring_info->in_order;
-		hw_ring_info.cmmd_rd_ptr = this_ring_info->cmmd_rd_ptr;
-		hw_ring_info.rslt_wr_ptr = this_ring_info->rslt_wr_ptr;
-		hw_ring_info.cmmd_rd_stats = this_ring_info->cmmd_rd_ptr;
-		hw_ring_info.rslt_wr_stats = this_ring_info->rslt_wr_stats;
+		hw_ring_info.in_order       = this_ring_info->in_order;
+		hw_ring_info.cmmd_rd_ptr    = this_ring_info->cmmd_rd_ptr;
+		hw_ring_info.rslt_wr_ptr    = this_ring_info->rslt_wr_ptr;
+		hw_ring_info.cmmd_rd_stats  = this_ring_info->cmmd_rd_ptr;
+		hw_ring_info.rslt_wr_stats  = this_ring_info->rslt_wr_stats;
 
 		return copy_to_user((void __user *)arg, &hw_ring_info,
-				    sizeof(hw_ring_info)) ?
-			       -EFAULT :
-			       0;
-	} else if (cmd == MLXBF_PKA_CLEAR_RING_COUNTERS) {
-		return mlxbf_pka_dev_clear_ring_counters(ring_dev->ring);
+				    sizeof(hw_ring_info)) ? -EFAULT : 0;
+	} else if (cmd == PKA_CLEAR_RING_COUNTERS) {
+		return pka_dev_clear_ring_counters(ring_dev->ring);
 	}
 
 	return error;
 }
 
-static struct mlxbf_pka {
+#ifdef CONFIG_PKA_VFIO_IOMMU
+static const struct vfio_device_ops pka_ring_vfio_ops = {
+	.name    = PKA_DRIVER_NAME,
+	.open    = pka_drv_ring_open,
+	.release = pka_drv_ring_release,
+	.ioctl   = pka_drv_ring_ioctl,
+	.mmap    = pka_drv_ring_mmap,
+};
+
+static int pka_drv_add_ring_device(struct pka_ring_device *ring_dev)
+{
+	struct device *dev = ring_dev->device;
+	int ret;
+
+	ring_dev->parent_module = THIS_MODULE;
+	ring_dev->flags         = VFIO_DEVICE_FLAGS_PLATFORM;
+
+	ring_dev->group = vfio_iommu_group_get(dev);
+	if (!ring_dev->group) {
+		PKA_DEBUG(PKA_DRIVER,
+			  "failed to get IOMMU group for device %d\n",
+			  ring_dev->device_id);
+		return -EINVAL;
+	}
+
+	/*
+	 * Note that this call aims to add the given child device to a vfio
+	 * group. This function creates a new driver data for the device
+	 * different from the structure passed as a 3rd argument - i.e.
+	 * pka_ring_dev. The struct newly created corresponds to 'vfio_device'
+	 * structure which includes a field called 'device_data' that holds
+	 * the initialized 'pka_ring_dev'. So to retrieve our private data,
+	 * we must call 'dev_get_drvdata()' which returns the 'vfio_device'
+	 * struct and access its 'device_data' field. Here one can use
+	 * 'pka_platdata' structure instead to be consistent with the parent
+	 * devices, and have a common driver data structure which will be used
+	 * to manage devices - 'pka_drv_remove()' for instance. Since the VFIO
+	 * framework alters the driver data and introduce an indirection, it
+	 * is no more relevant to have a common driver data structure. Hence,
+	 * we prefer to set the struct 'pka_vfio_dev' instead to avoid
+	 * indirection when we have to retrieve this structure during the
+	 * open(), mmap(), and ioctl() calls. Since, this structure is used
+	 * as driver data here, it will be immediately reachable for these
+	 * functions (see first argument passed (void *device_data) passed
+	 * to those functions).
+	 */
+	ret = vfio_add_group_dev(dev, &pka_ring_vfio_ops, ring_dev);
+	if (ret) {
+		PKA_DEBUG(PKA_DRIVER,
+			  "failed to add group device %d\n",
+			  ring_dev->device_id);
+		vfio_iommu_group_put(ring_dev->group, dev);
+		return ret;
+	}
+
+	ring_dev->group_id = iommu_group_id(ring_dev->group);
+
+	PKA_DEBUG(PKA_DRIVER,
+		  "ring device %d bus:%p iommu_ops:%p group:%p\n",
+		  ring_dev->device_id,
+		  dev->bus,
+		  dev->bus->iommu_ops,
+		  ring_dev->group);
+
+	return 0;
+}
+
+static struct pka_ring_device *pka_drv_del_ring_device(struct device *dev)
+{
+	struct pka_ring_device *ring_dev;
+
+	ring_dev = vfio_del_group_dev(dev);
+	if (ring_dev)
+		vfio_iommu_group_put(dev->iommu_group, dev);
+
+	return ring_dev;
+}
+
+static int pka_drv_init_class(void)
+{
+	return 0;
+}
+
+static void pka_drv_destroy_class(void)
+{
+}
+#else
+static struct pka {
 	struct class *class;
 	struct idr    ring_idr;
 	struct mutex  ring_lock;
@@ -453,20 +525,20 @@ static struct mlxbf_pka {
 	dev_t         ring_devt;
 } pka;
 
-static int mlxbf_pka_drv_open(struct inode *inode, struct file *filep)
+static int pka_drv_open(struct inode *inode, struct file *filep)
 {
-	struct mlxbf_pka_ring_device *ring_dev;
+	struct pka_ring_device *ring_dev;
 	int ret;
 
 	ring_dev = idr_find(&pka.ring_idr, iminor(inode));
 	if (!ring_dev) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER,
+		PKA_ERROR(PKA_DRIVER,
 			  "failed to find idr for device %d\n",
 			  ring_dev->device_id);
 		return -ENODEV;
 	}
 
-	ret = mlxbf_pka_drv_ring_open(ring_dev);
+	ret = pka_drv_ring_open(ring_dev);
 	if (ret)
 		return ret;
 
@@ -474,43 +546,43 @@ static int mlxbf_pka_drv_open(struct inode *inode, struct file *filep)
 	return 0;
 }
 
-static int mlxbf_pka_drv_release(struct inode *inode, struct file *filep)
+static int pka_drv_release(struct inode *inode, struct file *filep)
 {
-	struct mlxbf_pka_ring_device *ring_dev = filep->private_data;
+	struct pka_ring_device *ring_dev = filep->private_data;
 
 	filep->private_data = NULL;
-	mlxbf_pka_drv_ring_release(ring_dev);
+	pka_drv_ring_release(ring_dev);
 
 	return 0;
 }
 
-static int mlxbf_pka_drv_mmap(struct file *filep, struct vm_area_struct *vma)
+static int pka_drv_mmap(struct file *filep, struct vm_area_struct *vma)
 {
-	return mlxbf_pka_drv_ring_mmap(filep->private_data, vma);
+	return pka_drv_ring_mmap(filep->private_data, vma);
 }
 
-static long mlxbf_pka_drv_unlocked_ioctl(struct file *filep, unsigned int cmd,
-					 unsigned long arg)
+static long pka_drv_unlocked_ioctl(struct file *filep,
+				   unsigned int cmd, unsigned long arg)
 {
-	return mlxbf_pka_drv_ring_ioctl(filep->private_data, cmd, arg);
+	return pka_drv_ring_ioctl(filep->private_data, cmd, arg);
 }
 
 static const struct file_operations pka_ring_fops = {
 	.owner          = THIS_MODULE,
-	.open           = mlxbf_pka_drv_open,
-	.release        = mlxbf_pka_drv_release,
-	.unlocked_ioctl = mlxbf_pka_drv_unlocked_ioctl,
-	.mmap           = mlxbf_pka_drv_mmap,
+	.open           = pka_drv_open,
+	.release        = pka_drv_release,
+	.unlocked_ioctl = pka_drv_unlocked_ioctl,
+	.mmap           = pka_drv_mmap,
 };
 
-static int mlxbf_pka_drv_add_ring_device(struct mlxbf_pka_ring_device *ring_dev)
+static int pka_drv_add_ring_device(struct pka_ring_device *ring_dev)
 {
 	struct device *dev = ring_dev->device;
 
 	ring_dev->minor = idr_alloc(&pka.ring_idr,
 				    ring_dev, 0, MINORMASK + 1, GFP_KERNEL);
 	if (ring_dev->minor < 0) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
+		PKA_DEBUG(PKA_DRIVER,
 			  "failed to alloc minor to device %d\n",
 			  ring_dev->device_id);
 		return ring_dev->minor;
@@ -520,44 +592,43 @@ static int mlxbf_pka_drv_add_ring_device(struct mlxbf_pka_ring_device *ring_dev)
 			    MKDEV(MAJOR(pka.ring_devt), ring_dev->minor),
 			    ring_dev, "%d", ring_dev->device_id);
 	if (IS_ERR(dev)) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
+		PKA_DEBUG(PKA_DRIVER,
 			  "failed to create device %d\n",
 			  ring_dev->device_id);
 		idr_remove(&pka.ring_idr, ring_dev->minor);
 		return PTR_ERR(dev);
 	}
 
-	MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
+	PKA_DEBUG(PKA_DRIVER,
 		  "ring device %d minor:%d\n",
 		  ring_dev->device_id, ring_dev->minor);
 
 	return 0;
 }
 
-static struct mlxbf_pka_ring_device *
-mlxbf_pka_drv_del_ring_device(struct device *dev)
+static struct pka_ring_device *pka_drv_del_ring_device(struct device *dev)
 {
-	struct platform_device *pdev =
+	struct platform_device *pdev     =
 		container_of(dev, struct platform_device, dev);
-	struct mlxbf_pka_platdata *priv = platform_get_drvdata(pdev);
-	struct mlxbf_pka_info *info = priv->info;
-	struct mlxbf_pka_ring_device *mlxbf_pka_ring_dev = info->priv;
+	struct pka_platdata        *priv = platform_get_drvdata(pdev);
+	struct pka_info            *info = priv->info;
+	struct pka_ring_device *ring_dev = info->priv;
 
-	if (mlxbf_pka_ring_dev) {
+	if (ring_dev) {
 		device_destroy(pka.class, MKDEV(MAJOR(pka.ring_devt),
-						mlxbf_pka_ring_dev->minor));
-		idr_remove(&pka.ring_idr, mlxbf_pka_ring_dev->minor);
+						ring_dev->minor));
+		idr_remove(&pka.ring_idr, ring_dev->minor);
 	}
 
-	return mlxbf_pka_ring_dev;
+	return ring_dev;
 }
 
-static char *mlxbf_pka_drv_devnode(struct device *dev, umode_t *mode)
+static char *pka_drv_devnode(struct device *dev, umode_t *mode)
 {
 	return kasprintf(GFP_KERNEL, "pka/%s", dev_name(dev));
 }
 
-static int mlxbf_pka_drv_init_class(void)
+static int pka_drv_init_class(void)
 {
 	int ret;
 
@@ -568,7 +639,7 @@ static int mlxbf_pka_drv_init_class(void)
 		return PTR_ERR(pka.class);
 
 	/* /dev/pka/$RING */
-	pka.class->devnode = mlxbf_pka_drv_devnode;
+	pka.class->devnode = pka_drv_devnode;
 
 	ret = alloc_chrdev_region(&pka.ring_devt, 0, MINORMASK, "pka");
 	if (ret)
@@ -589,7 +660,7 @@ err_alloc_chrdev:
 	return ret;
 }
 
-static void mlxbf_pka_drv_destroy_class(void)
+static void pka_drv_destroy_class(void)
 {
 	idr_destroy(&pka.ring_idr);
 	cdev_del(&pka.ring_cdev);
@@ -597,52 +668,48 @@ static void mlxbf_pka_drv_destroy_class(void)
 	class_destroy(pka.class);
 	pka.class = NULL;
 }
+#endif
 
 /*
  * Note that this function must be serialized because it calls
- * 'mlxbf_pka_dev_register_shim' which manipulates common counters for
- * mlxbf_pka devices.
+ * 'pka_dev_register_shim' which manipulates common counters for
+ * pka devices.
  */
-static int mlxbf_pka_drv_register_device(struct mlxbf_pka_device *mlxbf_pka_dev)
+static int pka_drv_register_device(struct pka_device *pka_dev)
 {
-	u64 mlxbf_pka_shim_base;
-	u64 mlxbf_pka_shim_size;
-	u8 mlxbf_pka_shim_fw_id;
-	u32 mlxbf_pka_shim_id;
+	uint32_t pka_shim_id;
+	uint64_t pka_shim_base;
+	uint64_t pka_shim_size;
+	uint8_t  pka_shim_fw_id;
 
 	/* Register Shim */
-	mlxbf_pka_shim_id = mlxbf_pka_dev->device_id;
-	mlxbf_pka_shim_base = mlxbf_pka_dev->resource->start;
-	mlxbf_pka_shim_size =
-		mlxbf_pka_dev->resource->end - mlxbf_pka_shim_base;
-	mlxbf_pka_shim_fw_id = mlxbf_pka_dev->fw_id;
+	pka_shim_id    = pka_dev->device_id;
+	pka_shim_base  = pka_dev->resource->start;
+	pka_shim_size  = pka_dev->resource->end - pka_shim_base;
+	pka_shim_fw_id = pka_dev->fw_id;
 
-	mlxbf_pka_dev->shim = mlxbf_pka_dev_register_shim(mlxbf_pka_shim_id,
-							  mlxbf_pka_shim_base,
-							  mlxbf_pka_shim_size,
-							  mlxbf_pka_shim_fw_id);
-	if (!mlxbf_pka_dev->shim) {
-		MLXBF_PKA_DEBUG(
-			MLXBF_PKA_DRIVER,
-			"failed to register shim id=%u, base=0x%llx, size=0x%llx\n",
-			mlxbf_pka_shim_id, mlxbf_pka_shim_base,
-			mlxbf_pka_shim_size);
+	pka_dev->shim = pka_dev_register_shim(pka_shim_id, pka_shim_base,
+					      pka_shim_size, pka_shim_fw_id);
+	if (!pka_dev->shim) {
+		PKA_DEBUG(PKA_DRIVER,
+		  "failed to register shim id=%u, base=0x%llx, size=0x%llx\n",
+		  pka_shim_id, pka_shim_base, pka_shim_size);
 		return -EFAULT;
 	}
 
 	return 0;
 }
 
-static int
-mlxbf_pka_drv_unregister_device(struct mlxbf_pka_device *mlxbf_pka_dev)
+static int pka_drv_unregister_device(struct pka_device *pka_dev)
 {
-	if (!mlxbf_pka_dev)
+	if (!pka_dev)
 		return -EINVAL;
 
-	if (mlxbf_pka_dev->shim) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER, "unregister device shim %u\n",
-				mlxbf_pka_dev->shim->shim_id);
-		return mlxbf_pka_dev_unregister_shim(mlxbf_pka_dev->shim);
+	if (pka_dev->shim) {
+		PKA_DEBUG(PKA_DRIVER,
+				"unregister device shim %u\n",
+				pka_dev->shim->shim_id);
+		return pka_dev_unregister_shim(pka_dev->shim);
 	}
 
 	return 0;
@@ -650,126 +717,123 @@ mlxbf_pka_drv_unregister_device(struct mlxbf_pka_device *mlxbf_pka_dev)
 
 /*
  * Note that this function must be serialized because it calls
- * 'mlxbf_pka_dev_register_ring' which manipulates common counters for
- * ring devices.
+ * 'pka_dev_register_ring' which manipulates common counters for
+ * vfio devices.
  */
-static int mlxbf_pka_drv_register_ring_device(
-	struct mlxbf_pka_ring_device *mlxbf_pka_ring_dev)
+static int pka_drv_register_ring_device(struct pka_ring_device *ring_dev)
 {
-	u32 ring_id;
-	u32 shim_id;
+	uint32_t ring_id;
+	uint32_t shim_id;
 
-	ring_id = mlxbf_pka_ring_dev->device_id;
-	shim_id = mlxbf_pka_ring_dev->parent_device_id;
+	ring_id = ring_dev->device_id;
+	shim_id = ring_dev->parent_device_id;
 
-	mlxbf_pka_ring_dev->ring =
-		mlxbf_pka_dev_register_ring(ring_id, shim_id);
-	if (!mlxbf_pka_ring_dev->ring) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-				"failed to register ring %d\n", ring_id);
+	ring_dev->ring = pka_dev_register_ring(ring_id, shim_id);
+	if (!ring_dev->ring) {
+		PKA_DEBUG(PKA_DRIVER,
+			  "failed to register ring device %u\n", ring_id);
 		return -EFAULT;
 	}
 
 	return 0;
 }
 
-static int mlxbf_pka_drv_unregister_ring_device(
-	struct mlxbf_pka_ring_device *mlxbf_pka_ring_dev)
+static int pka_drv_unregister_ring_device(struct pka_ring_device *ring_dev)
 {
-	if (!mlxbf_pka_ring_dev)
+	uint32_t ring_id;
+
+	if (!ring_dev)
 		return -EINVAL;
 
-	if (mlxbf_pka_ring_dev->ring) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-				"unregister ring device ring %u\n",
-				mlxbf_pka_ring_dev->ring->ring_id);
-		return mlxbf_pka_dev_unregister_ring(mlxbf_pka_ring_dev->ring);
+	ring_id = ring_dev->ring->ring_id;
+
+	if (ring_dev->ring) {
+		PKA_DEBUG(PKA_DRIVER, "unregister ring device %u\n", ring_id);
+		return pka_dev_unregister_ring(ring_dev->ring);
 	}
 
 	return 0;
 }
 
-static const struct of_device_id mlxbf_pka_ring_match[] = {
-	{ .compatible = MLXBF_PKA_RING_DEVICE_COMPAT },
+static const struct of_device_id pka_ring_match[] = {
+	{ .compatible = PKA_RING_DEVICE_COMPAT },
 	{},
 };
 
-static int mlxbf_pka_drv_rng_read(struct hwrng *rng, void *data, size_t max,
-				  bool wait)
+static int pka_drv_rng_read(struct hwrng *rng, void *data, size_t max,
+			    bool wait)
 {
-	struct mlxbf_pka_device *mlxbf_pka_dev =
-		container_of(rng, struct mlxbf_pka_device, rng);
-	u32 *buffer = data;
 	int ret;
 
-	ret = mlxbf_pka_dev_trng_read(mlxbf_pka_dev->shim, buffer, max);
+	struct pka_device *pka_dev = container_of(rng, struct pka_device, rng);
+	uint32_t          *buffer = data;
+
+	ret = pka_dev_trng_read(pka_dev->shim, buffer, max);
 	if (ret) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-				"%s: failed to read random bytes ret=%d",
-				rng->name, ret);
+		PKA_DEBUG(PKA_DRIVER,
+			  "%s: failed to read random bytes ret=%d",
+			  rng->name, ret);
 		return 0;
 	}
 
 	return max;
 }
 
-static int mlxbf_pka_drv_probe_device(struct mlxbf_pka_info *info)
+static int pka_drv_probe_device(struct pka_info *info)
 {
-	struct device *dev = info->dev;
-	struct platform_device *pdev = to_platform_device(dev);
+	struct pka_device  *pka_dev;
+	struct device      *dev = info->dev;
 	struct device_node *of_node = dev->of_node;
-	struct mlxbf_pka_device *mlxbf_pka_dev;
+	struct platform_device *pdev = to_platform_device(dev);
 	struct hwrng *trng;
-	u8 revision;
+
+	u8  revision;
 	int ret;
 
 	if (!info)
 		return -EINVAL;
 
-	mlxbf_pka_dev = kzalloc(sizeof(*mlxbf_pka_dev), GFP_KERNEL);
-	if (!mlxbf_pka_dev)
+	pka_dev = kzalloc(sizeof(*pka_dev), GFP_KERNEL);
+	if (!pka_dev)
 		return -ENOMEM;
 
-	mutex_lock(&mlxbf_pka_drv_lock);
-	mlxbf_pka_device_cnt += 1;
-	if (mlxbf_pka_device_cnt > MLXBF_PKA_DRIVER_DEV_MAX) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER, "cannot support %u devices\n",
-				mlxbf_pka_device_cnt);
-		kfree(mlxbf_pka_dev);
-		mutex_unlock(&mlxbf_pka_drv_lock);
+	mutex_lock(&pka_drv_lock);
+	pka_device_cnt += 1;
+	if (pka_device_cnt > PKA_DRIVER_DEV_MAX) {
+		PKA_DEBUG(PKA_DRIVER,
+			  "cannot support %u devices\n", pka_device_cnt);
+		kfree(pka_dev);
+		mutex_unlock(&pka_drv_lock);
 		return -EPERM;
 	}
-	mlxbf_pka_dev->device_id = mlxbf_pka_device_cnt - 1;
-	mutex_unlock(&mlxbf_pka_drv_lock);
+	pka_dev->device_id = pka_device_cnt - 1;
+	mutex_unlock(&pka_drv_lock);
 
-	mlxbf_pka_dev->info = info;
-	mlxbf_pka_dev->device = dev;
-	info->flag = MLXBF_PKA_DRIVER_FLAG_DEVICE;
-	mutex_init(&mlxbf_pka_dev->mutex);
+	pka_dev->info   = info;
+	pka_dev->device = dev;
+	info->flag      = PKA_DRIVER_FLAG_DEVICE;
+	mutex_init(&pka_dev->mutex);
 
-	mlxbf_pka_dev->resource =
+	pka_dev->resource =
 		platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
 	/* Set interrupts */
 	ret = platform_get_irq(pdev, 0);
-	mlxbf_pka_dev->irq = ret;
+	pka_dev->irq = ret;
 	if (ret == -ENXIO && of_node) {
-		mlxbf_pka_dev->irq = MLXBF_PKA_IRQ_NONE;
+		pka_dev->irq = PKA_IRQ_NONE;
 	} else if (ret < 0) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER,
-				"failed to get device %u IRQ\n",
-				mlxbf_pka_dev->device_id);
-		kfree(mlxbf_pka_dev);
+		PKA_ERROR(PKA_DRIVER,
+			"failed to get device %u IRQ\n", pka_dev->device_id);
 		return ret;
 	}
 
 	/* Register IRQ */
-	ret = mlxbf_pka_drv_register_irq(mlxbf_pka_dev);
+	ret = pka_drv_register_irq(pka_dev);
 	if (ret) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER,
-				"failed to register device %u IRQ\n",
-				mlxbf_pka_dev->device_id);
-		kfree(mlxbf_pka_dev);
+		PKA_ERROR(PKA_DRIVER,
+			  "failed to register device %u IRQ\n",
+			  pka_dev->device_id);
 		return ret;
 	}
 
@@ -780,169 +844,220 @@ static int mlxbf_pka_drv_probe_device(struct mlxbf_pka_info *info)
 	 */
 	ret = device_property_read_u8(dev, "rev", &revision);
 	if (ret < 0)
-		revision = MLXBF_PKA_REVISION_1;
+		revision = PKA_REVISION_1;
 
 	switch (revision) {
-	case MLXBF_PKA_REVISION_1:
-		mlxbf_pka_dev->fw_id = MLXBF_PKA_FIRMWARE_IMAGE_0_ID;
+	case PKA_REVISION_1:
+		pka_dev->fw_id = PKA_FIRMWARE_IMAGE_0_ID;
 		break;
 
-	case MLXBF_PKA_REVISION_2:
-		mlxbf_pka_dev->fw_id = MLXBF_PKA_FIRMWARE_IMAGE_1_ID;
+	case PKA_REVISION_2:
+		pka_dev->fw_id = PKA_FIRMWARE_IMAGE_1_ID;
 		break;
 
 	default:
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER,
-				"device %u revision %u is not supported\n",
-				mlxbf_pka_dev->device_id, revision);
-		kfree(mlxbf_pka_dev);
+		PKA_ERROR(PKA_DRIVER,
+			  "device %u revision %u is not supported\n",
+			  pka_dev->device_id, revision);
 		return -EINVAL;
 	}
 
-	mutex_lock(&mlxbf_pka_drv_lock);
-	ret = mlxbf_pka_drv_register_device(mlxbf_pka_dev);
+	mutex_lock(&pka_drv_lock);
+	ret = pka_drv_register_device(pka_dev);
 	if (ret) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-				"failed to register shim id=%u\n",
-				mlxbf_pka_dev->device_id);
-		mutex_unlock(&mlxbf_pka_drv_lock);
-		kfree(mlxbf_pka_dev);
+		PKA_DEBUG(PKA_DRIVER, "failed to register shim id=%u\n",
+			  pka_dev->device_id);
+		mutex_unlock(&pka_drv_lock);
 		return ret;
 	}
-	mutex_unlock(&mlxbf_pka_drv_lock);
+	mutex_unlock(&pka_drv_lock);
 
 	/* Setup the TRNG, if needed */
-	if (mlxbf_pka_dev_has_trng(mlxbf_pka_dev->shim)) {
-		trng = &mlxbf_pka_dev->rng;
+	if (pka_dev_has_trng(pka_dev->shim)) {
+		trng = &pka_dev->rng;
 		trng->name = pdev->name;
-		trng->read = mlxbf_pka_drv_rng_read;
+		trng->read = pka_drv_rng_read;
 
-		ret = hwrng_register(&mlxbf_pka_dev->rng);
+		ret = hwrng_register(&pka_dev->rng);
 		if (ret) {
-			MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER,
-					"failed to register trng\n");
-			kfree(mlxbf_pka_dev);
+			PKA_ERROR(PKA_DRIVER,
+				  "failed to register trng\n");
 			return ret;
 		}
 	}
 
-	info->priv = mlxbf_pka_dev;
+	info->priv = pka_dev;
+
+#ifdef BUG_SW_1127083_FIXED
+	/*
+	 * Create platform devices (pka-ring) from current node.
+	 * This code is reserverd for DT.
+	 */
+	if (of_node) {
+		ret = of_platform_populate(of_node, pka_ring_match,
+					   NULL, dev);
+		if (ret) {
+			PKA_ERROR(PKA_DRIVER,
+				"failed to create platform devices\n");
+			return ret;
+		}
+	}
+#endif
 
 	return 0;
 }
 
-static int mlxbf_pka_drv_remove_device(struct platform_device *pdev)
+static int pka_drv_remove_device(struct platform_device *pdev)
 {
-	struct mlxbf_pka_platdata *priv = platform_get_drvdata(pdev);
-	struct mlxbf_pka_info *info = priv->info;
-	struct mlxbf_pka_device *mlxbf_pka_dev =
-		(struct mlxbf_pka_device *)info->priv;
+	struct pka_platdata *priv = platform_get_drvdata(pdev);
+	struct pka_info     *info = priv->info;
+	struct pka_device   *pka_dev = (struct pka_device *)info->priv;
 
-	if (!mlxbf_pka_dev) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER,
-				"failed to unregister device\n");
+	if (!pka_dev) {
+		PKA_ERROR(PKA_DRIVER, "failed to unregister device\n");
 		return -EINVAL;
 	}
 
-	if (mlxbf_pka_dev_has_trng(mlxbf_pka_dev->shim))
-		hwrng_unregister(&mlxbf_pka_dev->rng);
+	if (pka_dev_has_trng(pka_dev->shim))
+		hwrng_unregister(&pka_dev->rng);
 
-	if (mlxbf_pka_drv_unregister_device(mlxbf_pka_dev))
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER,
-				"failed to unregister device\n");
+	if (pka_drv_unregister_device(pka_dev))
+		PKA_ERROR(PKA_DRIVER, "failed to unregister device\n");
 
 	return 0;
 }
 
-static int mlxbf_pka_drv_probe_ring_device(struct mlxbf_pka_info *info)
+static int pka_drv_probe_ring_device(struct pka_info *info)
 {
-	struct mlxbf_pka_ring_device *mlxbf_pka_ring_dev;
-	struct device *dev = info->dev;
+	struct pka_ring_device *ring_dev;
+	struct device          *dev = info->dev;
+
 	int ret;
 
 	if (!info)
 		return -EINVAL;
 
-	mlxbf_pka_ring_dev = kzalloc(sizeof(*mlxbf_pka_ring_dev), GFP_KERNEL);
-	if (!mlxbf_pka_ring_dev)
+	ring_dev = kzalloc(sizeof(*ring_dev), GFP_KERNEL);
+	if (!ring_dev)
 		return -ENOMEM;
 
-	mutex_lock(&mlxbf_pka_drv_lock);
-	mlxbf_pka_ring_device_cnt += 1;
-	if (mlxbf_pka_ring_device_cnt > MLXBF_PKA_DRIVER_RING_DEV_MAX) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-				"cannot support %u ring devices\n",
-				mlxbf_pka_ring_device_cnt);
-		kfree(mlxbf_pka_ring_dev);
-		mutex_unlock(&mlxbf_pka_drv_lock);
+	mutex_lock(&pka_drv_lock);
+	pka_ring_device_cnt += 1;
+	if (pka_ring_device_cnt > PKA_DRIVER_RING_DEV_MAX) {
+		PKA_DEBUG(PKA_DRIVER, "cannot support %u ring devices\n",
+			  pka_ring_device_cnt);
+		kfree(ring_dev);
+		mutex_unlock(&pka_drv_lock);
 		return -EPERM;
 	}
-	mlxbf_pka_ring_dev->device_id = mlxbf_pka_ring_device_cnt - 1;
-	mlxbf_pka_ring_dev->parent_device_id = mlxbf_pka_device_cnt - 1;
-	mutex_unlock(&mlxbf_pka_drv_lock);
+	ring_dev->device_id        = pka_ring_device_cnt - 1;
+	ring_dev->parent_device_id = pka_device_cnt - 1;
+	mutex_unlock(&pka_drv_lock);
 
-	mlxbf_pka_ring_dev->info = info;
-	mlxbf_pka_ring_dev->device = dev;
-	info->flag = MLXBF_PKA_DRIVER_FLAG_RING_DEVICE;
-	mutex_init(&mlxbf_pka_ring_dev->mutex);
+	ring_dev->info   = info;
+	ring_dev->device = dev;
+	info->flag       = PKA_DRIVER_FLAG_RING_DEVICE;
+	mutex_init(&ring_dev->mutex);
 
-	ret = mlxbf_pka_drv_add_ring_device(mlxbf_pka_ring_dev);
+	ret = pka_drv_add_ring_device(ring_dev);
 	if (ret) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
+		PKA_DEBUG(PKA_DRIVER,
 			  "failed to add ring device %u\n",
-			  mlxbf_pka_ring_dev->device_id);
-		kfree(mlxbf_pka_ring_dev);
+			  ring_dev->device_id);
+		kfree(ring_dev);
 		return ret;
 	}
 
-	mutex_lock(&mlxbf_pka_drv_lock);
+	mutex_lock(&pka_drv_lock);
 	/* Register ring device */
-	ret = mlxbf_pka_drv_register_ring_device(mlxbf_pka_ring_dev);
+	ret = pka_drv_register_ring_device(ring_dev);
 	if (ret) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
+		PKA_DEBUG(PKA_DRIVER,
 			  "failed to register ring device %u\n",
-			  mlxbf_pka_ring_dev->device_id);
-		mutex_unlock(&mlxbf_pka_drv_lock);
+			  ring_dev->device_id);
+		mutex_unlock(&pka_drv_lock);
 		goto err_register_ring;
 	}
-	mutex_unlock(&mlxbf_pka_drv_lock);
+	mutex_unlock(&pka_drv_lock);
 
-	info->priv = mlxbf_pka_ring_dev;
+	info->priv = ring_dev;
 
 	return 0;
 
  err_register_ring:
-	mlxbf_pka_drv_del_ring_device(dev);
-	kfree(mlxbf_pka_ring_dev);
+	pka_drv_del_ring_device(dev);
+	kfree(ring_dev);
 	return ret;
 }
 
-static int mlxbf_pka_drv_remove_ring_device(struct platform_device *pdev)
+static int pka_drv_remove_ring_device(struct platform_device *pdev)
 {
-	struct mlxbf_pka_ring_device *mlxbf_pka_ring_dev;
-	struct device *dev = &pdev->dev;
+	struct pka_ring_device *ring_dev;
+	struct device          *dev = &pdev->dev;
 	int ret;
 
-	mlxbf_pka_ring_dev = mlxbf_pka_drv_del_ring_device(dev);
-	if (mlxbf_pka_ring_dev) {
-		ret = mlxbf_pka_drv_unregister_ring_device(mlxbf_pka_ring_dev);
+	ring_dev = pka_drv_del_ring_device(dev);
+	if (ring_dev) {
+		ret = pka_drv_unregister_ring_device(ring_dev);
 		if (ret) {
-			MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER,
-					"failed to unregister ring device %u\n",
-					mlxbf_pka_ring_dev->device_id);
+			PKA_ERROR(PKA_DRIVER,
+				  "failed to unregister vfio device\n");
 			return ret;
 		}
-		kfree(mlxbf_pka_ring_dev);
+		kfree(ring_dev);
 	}
 
 	return 0;
 }
 
-static int mlxbf_pka_drv_acpi_probe(struct platform_device *pdev,
-				    struct mlxbf_pka_info *info)
+static int pka_drv_of_probe(struct platform_device *pdev,
+				struct pka_info *info)
 {
+#ifdef BUG_SW_1127083_FIXED
 	struct device *dev = &pdev->dev;
+
+	int error;
+
+	error = device_property_read_string(dev, "compatible", &info->compat);
+	if (error) {
+		PKA_DEBUG(PKA_DRIVER, "cannot retrieve compat for %s\n",
+			  pdev->name);
+		return -EINVAL;
+	}
+
+	if (!strcmp(info->compat, pka_ring_compat)) {
+		PKA_PRINT(PKA_DRIVER, "probe ring device %s\n",
+			  pdev->name);
+		error = pka_drv_probe_ring_device(info);
+		if (error) {
+			PKA_DEBUG(PKA_DRIVER,
+				  "failed to register ring device compat=%s\n",
+				  info->compat);
+			return error;
+		}
+
+	} else if (!strcmp(info->compat, pka_compat)) {
+		PKA_PRINT(PKA_DRIVER, "probe device %s\n", pdev->name);
+		error = pka_drv_probe_device(info);
+		if (error) {
+			PKA_DEBUG(PKA_DRIVER,
+				  "failed to register device compat=%s\n",
+				  info->compat);
+			return error;
+		}
+	}
+
+	return 0;
+#endif
+	return -EPERM;
+}
+
+static int pka_drv_acpi_probe(struct platform_device *pdev,
+			      struct pka_info *info)
+{
 	struct acpi_device *adev;
+	struct device *dev = &pdev->dev;
+
 	int error;
 
 	if (acpi_disabled)
@@ -950,9 +1065,9 @@ static int mlxbf_pka_drv_acpi_probe(struct platform_device *pdev,
 
 	adev = ACPI_COMPANION(dev);
 	if (!adev) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-				"ACPI companion device not found for %s\n",
-				pdev->name);
+		PKA_DEBUG(PKA_DRIVER,
+			  "ACPI companion device not found for %s\n",
+			  pdev->name);
 		return -ENODEV;
 	}
 
@@ -960,37 +1075,37 @@ static int mlxbf_pka_drv_acpi_probe(struct platform_device *pdev,
 	if (WARN_ON(!info->acpihid))
 		return -EINVAL;
 
-	if (!strcmp(info->acpihid, mlxbf_pka_ring_acpihid)) {
-		error = mlxbf_pka_drv_probe_ring_device(info);
+	if (!strcmp(info->acpihid, pka_ring_acpihid)) {
+		error = pka_drv_probe_ring_device(info);
 		if (error) {
-			MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-					"failed to register ring device %s\n",
-					pdev->name);
+			PKA_DEBUG(PKA_DRIVER,
+				  "failed to register ring device %s\n",
+				  pdev->name);
 			return error;
 		}
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER, "ring device %s probed\n",
-				pdev->name);
+		PKA_DEBUG(PKA_DRIVER, "ring device %s probed\n",
+			  pdev->name);
 
-	} else if (!strcmp(info->acpihid, mlxbf_pka_acpihid)) {
-		error = mlxbf_pka_drv_probe_device(info);
+	} else if (!strcmp(info->acpihid, pka_acpihid)) {
+		error = pka_drv_probe_device(info);
 		if (error) {
-			MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER,
-					"failed to register device %s\n",
-					pdev->name);
+			PKA_DEBUG(PKA_DRIVER,
+				  "failed to register device %s\n",
+				  pdev->name);
 			return error;
 		}
-		MLXBF_PKA_PRINT(MLXBF_PKA_DRIVER, "device %s probed\n",
-				pdev->name);
+		PKA_PRINT(PKA_DRIVER, "device %s probed\n", pdev->name);
 	}
 
 	return 0;
 }
 
-static int mlxbf_pka_drv_probe(struct platform_device *pdev)
+static int pka_drv_probe(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
-	struct mlxbf_pka_platdata *priv;
-	struct mlxbf_pka_info *info;
+	struct pka_platdata *priv;
+	struct pka_info     *info;
+	struct device       *dev = &pdev->dev;
+
 	int ret;
 
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
@@ -1003,17 +1118,15 @@ static int mlxbf_pka_drv_probe(struct platform_device *pdev)
 	priv->irq_flags = 0;
 
 	info = kzalloc(sizeof(*info), GFP_KERNEL);
-	if (!info) {
-		kfree(priv);
+	if (!info)
 		return -ENOMEM;
-	}
 
-	info->name = pdev->name;
-	info->version = MLXBF_PKA_DRIVER_VERSION;
-	info->module = THIS_MODULE;
-	info->dev = dev;
+	info->name    = pdev->name;
+	info->version = PKA_DRIVER_VERSION;
+	info->module  = THIS_MODULE;
+	info->dev     = dev;
 
-	priv->info = info;
+	priv->info    = info;
 
 	platform_set_drvdata(pdev, priv);
 
@@ -1021,7 +1134,7 @@ static int mlxbf_pka_drv_probe(struct platform_device *pdev)
 	 * There can be two kernel build combinations. One build where
 	 * ACPI is not selected and another one with the ACPI.
 	 *
-	 * In the first case, 'mlxbf_pka_drv_acpi_probe' will return since
+	 * In the first case, 'pka_drv_acpi_probe' will return since
 	 * acpi_disabled is 1. DT user will not see any kind of messages
 	 * from ACPI.
 	 *
@@ -1034,17 +1147,19 @@ static int mlxbf_pka_drv_probe(struct platform_device *pdev)
 	 * If the firmware is ACPI type, then acpi_disabled is 0. All other
 	 * checks are valid checks. We cannot claim that this system is DT.
 	 */
-	ret = mlxbf_pka_drv_acpi_probe(pdev, info);
+	ret = pka_drv_acpi_probe(pdev, info);
+	if (ret)
+		ret = pka_drv_of_probe(pdev, info);
 
 	if (ret) {
-		MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER, "unknown device\n");
+		PKA_DEBUG(PKA_DRIVER, "unknown device\n");
 		return ret;
 	}
 
 	return 0;
 }
 
-static int mlxbf_pka_drv_remove(struct platform_device *pdev)
+static int pka_drv_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 
@@ -1052,17 +1167,17 @@ static int mlxbf_pka_drv_remove(struct platform_device *pdev)
 	 * Little hack here:
 	 * The issue here is that the driver data structure which holds our
 	 * initialized private data cannot be used when the 'pdev' arguments
-	 * points to child device -i.e. ring device. Indeed, during the probe
+	 * points to child device -i.e. vfio device. Indeed, during the probe
 	 * function we set an initialized structure called 'priv' as driver
 	 * data for all platform devices including parents devices and child
 	 * devices. This driver data is unique to each device - see call to
 	 * 'platform_set_drvdata()'. However, when we add the child device to
-	 * a ring group through 'ring_add_group_dev()' call, this function
-	 * creates a new driver data for the device - i.e.  a 'ring_device'
+	 * a vfio group through 'vfio_add_group_dev()' call, this function
+	 * creates a new driver data for the device - i.e.  a 'vfio_device'
 	 * structure which includes a field called 'device_data' to hold the
 	 * aforementionned initialized private data. So, to retrieve our
 	 * private data, we must call 'dev_get_drvdata()' which returns the
-	 * 'ring_device' struct and access its 'device_data' field. However,
+	 * 'vfio_device' struct and access its 'device_data' field. However,
 	 * this cannot be done before determining if the 'pdev' is associated
 	 * with a child device or a parent device.
 	 * In order to deal with that we propose this little hack which uses
@@ -1072,87 +1187,87 @@ static int mlxbf_pka_drv_remove(struct platform_device *pdev)
 	 * infos that defines the type of the device. The intuitive way to do
 	 * that is as following:
 	 *
-	 * struct mlxbf_pka_platdata *priv = platform_get_drvdata(pdev);
-	 * struct mlxbf_pka_info     *info = priv->info;
+	 * struct pka_platdata *priv = platform_get_drvdata(pdev);
+	 * struct pka_info     *info = priv->info;
 	 *
-	 * if (info->flag == MLXBF_PKA_DRIVER_FLAG_RING_DEVICE)
-	 *      return mlxbf_pka_drv_remove_ring_device(info);
-	 * if (info->flag == MLXBF_PKA_DRIVER_FLAG_DEVICE)
-	 *      return mlxbf_pka_drv_remove_device(info);
+	 * if (info->flag == PKA_DRIVER_FLAG_RING_DEVICE)
+	 *      return pka_drv_remove_ring_device(info);
+	 * if (info->flag == PKA_DRIVER_FLAG_DEVICE)
+	 *      return pka_drv_remove_ring_device(info);
 	 *
-	 * Since the returned private data of child devices -i.e ring devices
-	 * corresponds to 'ring_device' structure, we cannot use it to
+	 * Since the returned private data of child devices -i.e vfio devices
+	 * corresponds to 'vfio_device' structure, we cannot use it to
 	 * differentiate between parent and child devices. This alternative
 	 * solution is used instead.
 	 */
 	if (dev->iommu_group) {
-		MLXBF_PKA_PRINT(MLXBF_PKA_DRIVER, "remove ring device %s\n",
-				pdev->name);
-		return mlxbf_pka_drv_remove_ring_device(pdev);
+		PKA_PRINT(PKA_DRIVER, "remove ring device %s\n",
+			  pdev->name);
+		return pka_drv_remove_ring_device(pdev);
 	}
 
-	MLXBF_PKA_PRINT(MLXBF_PKA_DRIVER, "remove device %s\n", pdev->name);
-	return mlxbf_pka_drv_remove_device(pdev);
+	PKA_PRINT(PKA_DRIVER, "remove device %s\n", pdev->name);
+	return pka_drv_remove_device(pdev);
 }
 
-static const struct of_device_id mlxbf_pka_drv_match[] = {
-	{ .compatible = MLXBF_PKA_DEVICE_COMPAT },
-	{ .compatible = MLXBF_PKA_RING_DEVICE_COMPAT },
+static const struct of_device_id pka_drv_match[] = {
+	{ .compatible = PKA_DEVICE_COMPAT },
+	{ .compatible = PKA_RING_DEVICE_COMPAT },
 	{}
 };
 
-MODULE_DEVICE_TABLE(of, mlxbf_pka_drv_match);
+MODULE_DEVICE_TABLE(of, pka_drv_match);
 
-static const struct acpi_device_id mlxbf_pka_drv_acpi_ids[] = {
-	{ MLXBF_PKA_DEVICE_ACPIHID, 0 },
-	{ MLXBF_PKA_RING_DEVICE_ACPIHID, 0 },
+static const struct acpi_device_id pka_drv_acpi_ids[] = {
+	{ PKA_DEVICE_ACPIHID,      0 },
+	{ PKA_RING_DEVICE_ACPIHID, 0 },
 	{},
 };
 
-MODULE_DEVICE_TABLE(acpi, mlxbf_pka_drv_acpi_ids);
+MODULE_DEVICE_TABLE(acpi, pka_drv_acpi_ids);
 
-static struct platform_driver mlxbf_pka_drv = {
+static struct platform_driver pka_drv = {
 	.driver  = {
-		   .name = MLXBF_PKA_DRIVER_NAME,
-		   .of_match_table   = of_match_ptr(mlxbf_pka_drv_match),
-		   .acpi_match_table = ACPI_PTR(mlxbf_pka_drv_acpi_ids),
+		   .name = PKA_DRIVER_NAME,
+		   .of_match_table   = of_match_ptr(pka_drv_match),
+		   .acpi_match_table = ACPI_PTR(pka_drv_acpi_ids),
 		   },
-	.probe  = mlxbf_pka_drv_probe,
-	.remove = mlxbf_pka_drv_remove,
+	.probe  = pka_drv_probe,
+	.remove = pka_drv_remove,
 };
 
-/* Initialize the module - Register the mlxbf_pka platform driver */
-static int __init mlxbf_pka_drv_register(void)
+/* Initialize the module - Register the pka platform driver */
+static int __init pka_drv_register(void)
 {
 	int ret;
 
-	ret = mlxbf_pka_drv_init_class();
+	ret = pka_drv_init_class();
 	if (ret) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER, "failed to create class\n");
+		PKA_ERROR(PKA_DRIVER, "failed to create class\n");
 		return ret;
 	}
 
-	ret = platform_driver_register(&mlxbf_pka_drv);
+	ret = platform_driver_register(&pka_drv);
 	if (ret) {
-		MLXBF_PKA_ERROR(MLXBF_PKA_DRIVER, "failed to register platform driver\n");
+		PKA_ERROR(PKA_DRIVER, "failed to register platform driver\n");
 		return ret;
 	}
 
-	MLXBF_PKA_PRINT(MLXBF_PKA_DRIVER, "version: " MLXBF_PKA_DRIVER_VERSION "\n");
+	PKA_PRINT(PKA_DRIVER, "version: " PKA_DRIVER_VERSION "\n");
 
 	return 0;
 }
 
-/* Cleanup the module - unregister the mlxbf_pka platform driver */
-static void __exit mlxbf_pka_drv_unregister(void)
+/* Cleanup the module - unregister the pka platform driver */
+static void __exit pka_drv_unregister(void)
 {
-	MLXBF_PKA_DEBUG(MLXBF_PKA_DRIVER, "unregister platform driver\n");
-	platform_driver_unregister(&mlxbf_pka_drv);
-	mlxbf_pka_drv_destroy_class();
+	platform_driver_unregister(&pka_drv);
+	pka_drv_destroy_class();
 }
 
-module_init(mlxbf_pka_drv_register);
-module_exit(mlxbf_pka_drv_unregister);
+module_init(pka_drv_register);
+module_exit(pka_drv_unregister);
 
-MODULE_DESCRIPTION(MLXBF_PKA_DRIVER_DESCRIPTION);
+MODULE_DESCRIPTION(PKA_DRIVER_DESCRIPTION);
+MODULE_VERSION(PKA_DRIVER_VERSION);
 MODULE_LICENSE("Dual BSD/GPL");

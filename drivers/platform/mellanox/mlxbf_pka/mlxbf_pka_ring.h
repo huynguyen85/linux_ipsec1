@@ -1,248 +1,276 @@
-/* SPDX-License-Identifier: GPL-2.0-only OR Linux-OpenIB
- *
- * Copyright (c) 2020 NVIDIA Corporation. All rights reserved.
- */
+//
+//   BSD LICENSE
+//
+//   Copyright(c) 2016 Mellanox Technologies, Ltd. All rights reserved.
+//   All rights reserved.
+//
+//   Redistribution and use in source and binary forms, with or without
+//   modification, are permitted provided that the following conditions
+//   are met:
+//
+//     * Redistributions of source code must retain the above copyright
+//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above copyright
+//       notice, this list of conditions and the following disclaimer in
+//       the documentation and/or other materials provided with the
+//       distribution.
+//     * Neither the name of Mellanox Technologies nor the names of its
+//       contributors may be used to endorse or promote products derived
+//       from this software without specific prior written permission.
+//
+//   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+//   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+//   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+//   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+//   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+//   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+//   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+//   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+//   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+//   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
 
-#ifndef __MLXBF_PKA_RING_H__
-#define __MLXBF_PKA_RING_H__
+#ifndef __PKA_RING_H__
+#define __PKA_RING_H__
+
+///
+/// @file
+///
+/// This file forms an interface to the BlueField Public Key Accelerator based
+/// on EIP-154.
+///
+/// Rings are used as a communication mechanism between ARM cores (controller)
+/// and the farm engines controlled by EIP-154 master firmware.
+///
+/// Note that the API defines data stuctures and functions to manage rings
+/// within window RAM, and to enqueue/dequeue descriptors. Rings are considered
+/// as a memory of descriptors (command/result descriptors) using finite size
+/// circular queue and a couple of control status registers (count registers).
+///
+
 
 #include <linux/types.h>
 
-/**
- * mlxbf_pka_ring_hw_cmd_desc_t - Bluefield PKA command descriptor structure
- * Structure is 64 bytes long. 64 bytes aligned
- * @pointer_a
- * @pointer_b
- * @pointer_c
- * @pointer_d
- * @tag
- * @pointer_e
- * @linked
- * @driver_status
- * @odd_poers: Shift count for shift operations
- * @kdk: Key decryption key number
- * @encryted_mask
- * @rsvd_3
- * @command
- * @rsvd_2
- * @length_b
- * @output_attr
- * @input_attr
- * @rsvd_1
- * @length_a
- * @rsvd_0
- * @rsvd_4
- */
-struct mlxbf_pka_ring_hw_cmd_desc_t {
-	u64 pointer_a;
-	u64 pointer_b;
-	u64 pointer_c;
-	u64 pointer_d;
-	u64 tag;
-	u64 pointer_e;
-#ifdef __BIG_ENDIAN_BITFIELD
-	u64 linked : 1;
-	u64 driver_status : 2;
-	u64 odd_powers : 5;
-	u64 kdk : 2;
-	u64 encrypted_mask : 6;
-	u64 rsvd_3 : 8;
-	u64 command : 8;
-	u64 rsvd_2 : 5;
-	u64 length_b : 9;
-	u64 output_attr : 1;
-	u64 input_attr : 1;
-	u64 rsvd_1 : 5;
-	u64 length_a : 9;
-	u64 rsvd_0 : 2;
-#else
-	u64 rsvd_0 : 2;
-	u64 length_a : 9;
-	u64 rsvd_1 : 5;
-	u64 input_attr : 1;
-	u64 output_attr : 1;
-	u64 length_b : 9;
-	u64 rsvd_2 : 5;
-	u64 command : 8;
-	u64 rsvd_3 : 8;
-	u64 encrypted_mask : 6;
-	u64 kdk : 2;
-	u64 odd_powers : 5;
-	u64 driver_status : 2;
-	u64 linked : 1;
+#ifdef PKA_LIB_RING_DEBUG
+// A structure that stores the ring statistics.
+typedef struct
+{
+    uint64_t enq_success_cmd;  ///< Cmd descriptors successfully enqueued.
+    uint64_t enq_fail_cmd;     ///< Cmd descriptors that failed to be enqueued.
+    uint64_t deq_success_rslt; ///< Rslt descriptors successfully dequeued.
+    uint64_t deq_fail_rslt;    ///< Rslt descriptors that failed to be dequeued.
+} pka_ring_debug_stats __pka_cache_aligned;
 #endif
-	u64 rsvd_4;
-};
 
-#define MLXBF_PKA_CMD_DESC_SIZE sizeof(struct mlxbf_pka_ring_hw_cmd_desc_t)
-
-/**
- * mlxbf_pka_ring_hw_rslt_desc_t - Bluefield PKA result descriptor structure
- * Structure is 64 bytes long. 64 bytes aligned
- * @pointer_a
- * @pointer_b
- * @pointer_c
- * @pointer_d
- * @tag
- * @rsvd_5
- * @cmp_result
- * @modulo_is_0
- * @rsvd_4
- * @modulo_msw_offset
- * @rsvd_3
- * @rsvd_2
- * @main_result_msb_offset
- * @result_is_0
- * @rsvd_1
- * @main_result_msw_offset
- * @rsvd_0
- * @linked
- * @driver_status : Always written to 0
- * @odd_poers: Shift count for shift operations
- * @kdk: Key decryption key number
- * @encryted_mask
- * @result_code
- * @command
- * @rsvd_8
- * @length_b
- * @output_attr
- * @input_attr
- * @rsvd_7
- * @length_a
- * @rsvd_6
- * @rsvd_9
- */
-struct mlxbf_pka_ring_hw_rslt_desc_t {
-	u64 pointer_a;
-	u64 pointer_b;
-	u64 pointer_c;
-	u64 pointer_d;
-	u64 tag;
-#ifdef __BIG_ENDIAN_BITFIELD
-	u64 rsvd_5 : 13;
-	u64 cmp_result : 3;
-	u64 modulo_is_0 : 1;
-	u64 rsvd_4 : 2;
-	u64 modulo_msw_offset : 11;
-	u64 rsvd_3 : 2;
-	u64 rsvd_2 : 11;
-	u64 main_result_msb_offset : 5;
-	u64 result_is_0 : 1;
-	u64 rsvd_1 : 2;
-	u64 main_result_msw_offset : 11;
-	u64 rsvd_0 : 2;
-	u64 linked : 1;
-	u64 driver_status : 2;
-	u64 odd_powers : 5;
-	u64 kdk : 2;
-	u64 encrypted_mask : 6;
-	u64 result_code : 8;
-	u64 command : 8;
-	u64 rsvd_8 : 5;
-	u64 length_b : 9;
-	u64 output_attr : 1;
-	u64 input_attr : 1;
-	u64 rsvd_7 : 5;
-	u64 length_a : 9;
-	u64 rsvd_6 : 2;
+#ifdef PKA_LIB_RING_DEBUG
+#define __RING_STAT_ADD(r, name, n) ({ ##r##->stats.##name += 1; })
 #else
-	u64 rsvd_0 : 2;
-	u64 main_result_msw_offset : 11;
-	u64 rsvd_1 : 2;
-	u64 result_is_0 : 1;
-	u64 main_result_msb_offset : 5;
-	u64 rsvd_2 : 11;
-	u64 rsvd_3 : 2;
-	u64 modulo_msw_offset : 11;
-	u64 rsvd_4 : 2;
-	u64 modulo_is_0 : 1;
-	u64 cmp_result : 3;
-	u64 rsvd_5 : 13;
-	u64 rsvd_6 : 2;
-	u64 length_a : 9;
-	u64 rsvd_7 : 5;
-	u64 input_attr : 1;
-	u64 output_attr : 1;
-	u64 length_b : 9;
-	u64 rsvd_8 : 5;
-	u64 command : 8;
-	u64 result_code : 8;
-	u64 encrypted_mask : 6;
-	u64 kdk : 2;
-	u64 odd_powers : 5;
-	u64 driver_status : 2;
-	u64 linked : 1;
+#define __RING_STAT_ADD(r, name, n) do {} while(0)
 #endif
-	u64 rsvd_9;
-};
 
-/**
- * mlxbf_pka_ring_desc_t - Structure for PKA command and result ring
- * as used by hardware.
- * @num_descs: total number of descriptors in the ring.
- * @cmd_ring_base: base address of the command ring.
- * @cmd_idx: index of the command in a ring.
- * @rslt_ring_base: base address of the result ring.
- * @rslt_idx: index of the result in a ring.
- * @operands_base: operands memory base address.
- * @operands_end: end address of operands memory.
- * @desc_size: size of each element in the ring.
- * @cmd_desc_mask: bitmask of free(0)/in_use(1) cmd descriptors.
- * @cmd_desc_cnt: number of command descriptors currently in use.
- * @rslt_desc_cnt: number of result descriptors currently ready.
- */
-struct mlxbf_pka_ring_desc_t {
-	u32 num_descs;
-	u32 cmd_ring_base;
-	u32 cmd_idx;
-	u32 rslt_ring_base;
-	u32 rslt_idx;
-	u32 operands_base;
-	u32 operands_end;
-	u32 desc_size;
-	u64 cmd_desc_mask;
-	u32 cmd_desc_cnt;
-	u32 rslt_desc_cnt;
-};
+/// Bluefield PKA command descriptor.
+typedef struct  // 64 bytes long. 64 bytes aligned
+{
+    uint64_t pointer_a;
+    uint64_t pointer_b;
+    uint64_t pointer_c;
+    uint64_t pointer_d;
+    uint64_t tag;
+    uint64_t pointer_e;
 
-/**
- * mlxbf_pka_ring_info_t - Structure for ring parameters
- * @fd:
- * @group: iommu group.
- * @container: vfio cointainer.
- * @idx:
- * @ring_id: hardware ring identifier.
- * @mem_off: offset specific to window RAM region.
- * @mem_addr: window RAM region address.
- * @mem_size: window RAM region size.
- * @reg_off: offset specific to count registers region.
- * @reg_addr: count registers region address.
- * @reg_size: count registers region size.
- * @mem_ptr: pointer to map-ped memory region.
- * @reg_ptr: pointer to map-ped counters region.
- * @ring_desc: ring descriptor.
- * @stats:
- * @big_endian:
- */
-struct mlxbf_pka_ring_info_t {
-	int fd;
-	int group;
-	int container;
-	u32 idx;
-	u32 ring_id;
-	u64 mem_off;
-	u64 mem_addr;
-	u64 mem_size;
-	u64 reg_off;
-	u64 reg_addr;
-	u64 reg_size;
-	void *mem_ptr;
-	void *reg_ptr;
-	struct mlxbf_pka_ring_desc_t ring_desc;
-	u8 big_endian;
-};
+#ifdef __AARCH64EB__
+    uint64_t linked         : 1;
+    uint64_t driver_status  : 2;
+    uint64_t odd_powers     : 5;    ///< shiftCnt for shift ops
+    uint64_t kdk            : 2;    ///< Key Decryption Key number
+    uint64_t encrypted_mask : 6;
+    uint64_t rsvd_3         : 8;
+    uint64_t command        : 8;
+    uint64_t rsvd_2         : 5;
+    uint64_t length_b       : 9;
+    uint64_t output_attr    : 1;
+    uint64_t input_attr     : 1;
+    uint64_t rsvd_1         : 5;
+    uint64_t length_a       : 9;
+    uint64_t rsvd_0         : 2;
+#else
+    uint64_t rsvd_0         : 2;
+    uint64_t length_a       : 9;
+    uint64_t rsvd_1         : 5;
+    uint64_t input_attr     : 1;
+    uint64_t output_attr    : 1;
+    uint64_t length_b       : 9;
+    uint64_t rsvd_2         : 5;
+    uint64_t command        : 8;
+    uint64_t rsvd_3         : 8;
+    uint64_t encrypted_mask : 6;
+    uint64_t kdk            : 2;    ///< Key Decryption Key number
+    uint64_t odd_powers     : 5;    ///< shiftCnt for shift ops
+    uint64_t driver_status  : 2;
+    uint64_t linked         : 1;
+#endif
+
+    uint64_t rsvd_4;
+} pka_ring_hw_cmd_desc_t;
+
+#define CMD_DESC_SIZE  sizeof(pka_ring_hw_cmd_desc_t)  // Must be 64
+
+/// Bluefield PKA result descriptor.
+typedef struct  // 64 bytes long. 64 bytes aligned
+{
+    uint64_t pointer_a;
+    uint64_t pointer_b;
+    uint64_t pointer_c;
+    uint64_t pointer_d;
+    uint64_t tag;
+
+#ifdef __AARCH64EB__
+    uint64_t rsvd_5                 : 13;
+    uint64_t cmp_result             : 3;
+    uint64_t modulo_is_0            : 1;
+    uint64_t rsvd_4                 : 2;
+    uint64_t modulo_msw_offset      : 11;
+    uint64_t rsvd_3                 : 2;
+    uint64_t rsvd_2                 : 11;
+    uint64_t main_result_msb_offset : 5;
+    uint64_t result_is_0            : 1;
+    uint64_t rsvd_1                 : 2;
+    uint64_t main_result_msw_offset : 11;
+    uint64_t rsvd_0                 : 2;
+
+    uint64_t linked         : 1;
+    uint64_t driver_status  : 2;    ///< Always written to 0
+    uint64_t odd_powers     : 5;    ///< shiftCnt for shift ops
+    uint64_t kdk            : 2;    ///< Key Decryption Key number
+    uint64_t encrypted_mask : 6;
+    uint64_t result_code    : 8;
+    uint64_t command        : 8;
+    uint64_t rsvd_8         : 5;
+    uint64_t length_b       : 9;
+    uint64_t output_attr    : 1;
+    uint64_t input_attr     : 1;
+    uint64_t rsvd_7         : 5;
+    uint64_t length_a       : 9;
+    uint64_t rsvd_6         : 2;
+#else
+    uint64_t rsvd_0                 : 2;
+    uint64_t main_result_msw_offset : 11;
+    uint64_t rsvd_1                 : 2;
+    uint64_t result_is_0            : 1;
+    uint64_t main_result_msb_offset : 5;
+    uint64_t rsvd_2                 : 11;
+    uint64_t rsvd_3                 : 2;
+    uint64_t modulo_msw_offset      : 11;
+    uint64_t rsvd_4                 : 2;
+    uint64_t modulo_is_0            : 1;
+    uint64_t cmp_result             : 3;
+    uint64_t rsvd_5                 : 13;
+
+    uint64_t rsvd_6         : 2;
+    uint64_t length_a       : 9;
+    uint64_t rsvd_7         : 5;
+    uint64_t input_attr     : 1;
+    uint64_t output_attr    : 1;
+    uint64_t length_b       : 9;
+    uint64_t rsvd_8         : 5;
+    uint64_t command        : 8;
+    uint64_t result_code    : 8;
+    uint64_t encrypted_mask : 6;
+    uint64_t kdk            : 2;    ///< Key Decryption Key number
+    uint64_t odd_powers     : 5;    ///< shiftCnt for shift ops
+    uint64_t driver_status  : 2;    ///< Always written to 0
+    uint64_t linked         : 1;
+#endif
+
+    uint64_t rsvd_9;
+} pka_ring_hw_rslt_desc_t;
+
+#define RESULT_DESC_SIZE  sizeof(pka_ring_hw_rslt_desc_t)  // Must be 64
+
+/// Describes a PKA command/result ring as used by the hardware.  A pair of
+/// command and result rings in PKA window memory, and the data memory used
+/// by the commands.
+typedef struct
+{
+  uint32_t num_descs;      ///< total number of descriptors in the ring.
+
+  uint32_t cmd_ring_base;  ///< base address of the command ring.
+  uint32_t cmd_idx;        ///< index of the command in a ring.
+
+  uint32_t rslt_ring_base; ///< base address of the result ring.
+  uint32_t rslt_idx;       ///< index of the result in a ring.
+
+  uint32_t operands_base;  ///< operands memory base address.
+  uint32_t operands_end;   ///< end address of operands memory.
+
+  uint32_t desc_size;      ///< size of each element in the ring.
+
+  uint64_t cmd_desc_mask;  ///< bitmask of free(0)/in_use(1) cmd descriptors.
+  uint32_t cmd_desc_cnt;   ///< number of command descriptors currently in use.
+  uint32_t rslt_desc_cnt;  ///< number of result descriptors currently ready.
+} pka_ring_desc_t;
+
+/// This structure declares ring parameters which can be used by user interface.
+typedef struct
+{
+    int         fd;             ///< file descriptor.
+    int         group;          ///< iommu group.
+    int         container;      ///< vfio cointainer
+
+    uint32_t    idx;            ///< ring index.
+    uint32_t    ring_id;        ///< hardware ring identifier.
+
+    uint64_t    mem_off;        ///< offset specific to window RAM region.
+    uint64_t    mem_addr;       ///< window RAM region address.
+    uint64_t    mem_size;       ///< window RAM region size.
+
+    uint64_t    reg_off;        ///< offset specific to count registers region.
+    uint64_t    reg_addr;       ///< count registers region address.
+    uint64_t    reg_size;       ///< count registers region size.
+
+    void       *mem_ptr;        ///< pointer to map-ped memory region.
+    void       *reg_ptr;        ///< pointer to map-ped counters region.
+
+    pka_ring_desc_t ring_desc;  ///< ring descriptor.
+
+#ifdef PKA_LIB_RING_DEBUG
+    struct pka_ring_debug_stats stats;
+#endif
+
+    uint8_t     big_endian;     ///< big endian byte order when enabled.
+} pka_ring_info_t;
+
+typedef struct
+{
+    uint32_t  dst_offset;        ///< operands desctination offset.
+    uint32_t  max_dst_offset;    ///< operands end offset.
+
+    pka_ring_info_t *ring;
+} pka_ring_alloc_t;
+
+// This sturcture encapsulates 'user data' information, it also includes
+// additional information useful for command processing and statistics.
+typedef struct
+{
+    uint64_t valid; ///< if set to 'PKA_UDATA_INFO_VALID' then info is valid
+    uint64_t user_data;     ///< opaque user address.
+    uint64_t cmd_num;       ///< command request number.
+    uint8_t  cmd_desc_idx;  ///< index of the cmd descriptor in HW rings
+    uint8_t  ring_num;      ///< command request number.
+    uint8_t  queue_num;     ///< queue number.
+} pka_udata_info_t;
+
+#define PKA_UDATA_INFO_VALID    0xDEADBEEF
+
+// This structure consists of a data base to store user data information.
+// Note that a data base should be associated with a hardware ring.
+typedef struct
+{
+    pka_udata_info_t entries[32]; // user data information entries.
+    uint8_t          index   : 5; // entry index. Wrapping is permitted.
+} pka_udata_db_t;
+
+#endif /// __PKA_RING_H__
 
 
-#define MLXBF_PKA_RESULT_DESC_SIZE sizeof(struct mlxbf_pka_ring_hw_rslt_desc_t)
-
-#endif /* __MLXBF_PKA_RING_H__ */

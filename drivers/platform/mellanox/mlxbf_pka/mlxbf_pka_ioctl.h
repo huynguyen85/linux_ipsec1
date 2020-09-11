@@ -1,87 +1,112 @@
-/* SPDX-License-Identifier: GPL-2.0-only OR Linux-OpenIB
- *
- * Copyright (c) 2020 NVIDIA Corporation. All rights reserved.
- */
+//
+//   BSD LICENSE
+//
+//   Copyright(c) 2016 Mellanox Technologies, Ltd. All rights reserved.
+//   All rights reserved.
+//
+//   Redistribution and use in source and binary forms, with or without
+//   modification, are permitted provided that the following conditions
+//   are met:
+//
+//     * Redistributions of source code must retain the above copyright
+//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above copyright
+//       notice, this list of conditions and the following disclaimer in
+//       the documentation and/or other materials provided with the
+//       distribution.
+//     * Neither the name of Mellanox Technologies nor the names of its
+//       contributors may be used to endorse or promote products derived
+//       from this software without specific prior written permission.
+//
+//   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+//   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+//   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+//   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+//   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+//   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+//   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+//   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+//   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+//   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
 
-#ifndef __MLXBF_PKA_IOCTL_H__
-#define __MLXBF_PKA_IOCTL_H__
+#ifndef __PKA_IOCTL_H__
+#define __PKA_IOCTL_H__
 
-#include <linux/ioctl.h>
+
 #include <linux/types.h>
+#include <linux/ioctl.h>
 
-#define MLXBF_PKA_IOC_TYPE 0xB7
+#define PKA_IOC_TYPE 0xB7
 
-/** mlxbf_pka_dev_region_info_t - PKA device region structure
- * @reg_index: register index
- * @reg_size: register size (in bytes)
- * @reg_offset: register offset from start of device fd
- * @mem_index: memory index
- * @mem_size: memory size (in bytes)
- * @mem_offset: memory offset from start of device fd
- */
-struct mlxbf_pka_dev_region_info_t {
-	u32 reg_index;
-	u64 reg_size;
-	u64 reg_offset;
-	u32 mem_index;
-	u64 mem_size;
-	u64 mem_offset;
-};
+/// PKA_RING_GET_REGION_INFO - _IORW(PKA_IOC_TYPE, 0x0, pka_dev_region_info_t)
+///
+/// Retrieve information about a device region. This is intended to describe
+/// MMIO, I/O port, as well as bus specific regions (ex. PCI config space).
+/// Zero sized regions may be used to describe unimplemented regions.
+/// Return: 0 on success, -errno on failure.
+typedef struct
+{
+    uint32_t reg_index;    ///< Registers region index.
+    uint64_t reg_size;     ///< Registers region size (bytes).
+    uint64_t reg_offset;   ///< Registers region offset from start of device fd.
 
-/*
- * MLXBF_PKA_RING_GET_REGION_INFO:
- * _IORW(MLXBF_PKA_IOC_TYPE, 0x0, mlxbf_pka_dev_region_info_t)
- * Retrieve information about a device region. This is intended to describe
- * MMIO, I/O port, as well as bus specific regions (ex. PCI config space).
- * Zero sized regions may be used to describe unimplemented regions.
- * Return: 0 on success, -errno on failure.
- */
-#define MLXBF_PKA_RING_GET_REGION_INFO                                         \
-	_IOWR(MLXBF_PKA_IOC_TYPE, 0x0, struct mlxbf_pka_dev_region_info_t)
+    uint32_t mem_index;    ///< Memory region index.
+    uint64_t mem_size;     ///< Memory region size (bytes).
+    uint64_t mem_offset;   ///< Memeory region offset from start of device fd.
+} pka_dev_region_info_t;
+#define PKA_RING_GET_REGION_INFO _IOWR(PKA_IOC_TYPE, 0x0, pka_dev_region_info_t)
 
-/** mlxbf_pka_dev_hw_ring_info_t - PKA device ring structure
- * @cmmd_base: Base address of command descriptor ring
- * @rslt_base: Base address of result descriptor ring
- * @size: Size of a command ring in number of descriptors, minus 1.
-	  Min value is 0 (for 1 descriptor); Max value is 65535 (64K)
- * @host_desc_size: Size (in 32-bit words) of the space the PKI command
-		    and result decriptor occupies on the Host.
- * @in_order: Indicates whether the result ring delivers results strictly
-	      in-order('1') or that result descriptors are written to the
-	      result ring as soon as they become available ('0')
- * @cmmd_rd_ptr: Read pointer of the command descriptor ring
- * @rslt_wr_ptr: Write pointer of the result descriptor ring
- * @cmmd_rd_stats
- * @rslt_wr_stats
- */
-struct mlxbf_pka_dev_hw_ring_info_t { /* Bluefield specific ring information */
-	u64 cmmd_base;
-	u64 rslt_base;
-	u16 size;
-	u16 host_desc_size : 10;
-	u8 in_order : 1;
-	u16 cmmd_rd_ptr;
-	u16 rslt_wr_ptr;
-	u16 cmmd_rd_stats;
-	u16 rslt_wr_stats;
-};
+/// PKA_GET_RING_INFO - _IORW(PKA_IOC_TYPE, 0x1, pka_dev_ring_info_t)
+///
+/// Retrieve information about a ring. This is intended to describe ring
+/// information words located in PKA_BUFFER_RAM. Ring information includes
+/// base addresses, size and statistics.
+/// Return: 0 on success, -errno on failure.
+typedef struct // Bluefield specific ring information
+{
+    /// Base address of the command descriptor ring.
+    uint64_t cmmd_base;
 
-/*
- * MLXBF_PKA_GET_RING_INFO:
- * _IORW(MLXBF_PKA_IOC_TYPE, 0x1, struct mlxbf_pka_dev_ring_info_t)
- * Retrieve information about a ring. This is intended to describe ring
- * information words located in MLXBF_PKA_BUFFER_RAM. Ring information includes
- * base addresses, size and statistics.
- * Return: 0 on success, -errno on failure.
- */
-#define MLXBF_PKA_GET_RING_INFO                                                \
-	_IOWR(MLXBF_PKA_IOC_TYPE, 0x1, struct mlxbf_pka_dev_hw_ring_info_t)
+    /// Base address of the result descriptor ring.
+    uint64_t rslt_base;
 
-/*
- * MLXBF_PKA_CLEAR_RING_COUNTERS: _IO(MLXBF_PKA_IOC_TYPE, 0x2)
- * Clear counters. This is intended to reset all command and result counters.
- * Return: 0 on success, -errno on failure.
- */
-#define MLXBF_PKA_CLEAR_RING_COUNTERS _IO(MLXBF_PKA_IOC_TYPE, 0x2)
+    /// Size of a command ring in number of descriptors, minus 1.
+    /// Minimum value is 0 (for 1 descriptor); maximum value is
+    /// 65535 (for 64K descriptors).
+    uint16_t size;
 
-#endif /* __MLXBF_PKA_IOCTL_H__ */
+    /// This field specifies the size (in 32-bit words) of the
+    /// space that PKI command and result descriptor occupies on
+    /// the Host.
+    uint16_t host_desc_size : 10;
+
+    /// Indicates whether the result ring delivers results strictly
+    /// in-order ('1') or that result descriptors are written to the
+    /// result ring as soon as they become available, so out-of-order
+    /// ('0').
+    uint8_t  in_order       : 1;
+
+    /// Read pointer of the command descriptor ring.
+    uint16_t cmmd_rd_ptr;
+
+    /// Write pointer of the result descriptor ring.
+    uint16_t rslt_wr_ptr;
+
+    /// Read statistics of the command descriptor ring.
+    uint16_t cmmd_rd_stats;
+
+    /// Write statistics of the result descriptor ring.
+    uint16_t rslt_wr_stats;
+
+} pka_dev_hw_ring_info_t;
+#define PKA_GET_RING_INFO   _IOWR(PKA_IOC_TYPE, 0x1, pka_dev_hw_ring_info_t)
+
+/// PKA_CLEAR_RING_COUNTERS - _IO(PKA_IOC_TYPE, 0x2)
+///
+/// Clear counters. This is intended to reset all command and result counters.
+/// Return: 0 on success, -errno on failure.
+#define PKA_CLEAR_RING_COUNTERS  _IO(PKA_IOC_TYPE, 0x2)
+
+#endif // __PKA_IOCTL_H__

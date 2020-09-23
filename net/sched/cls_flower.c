@@ -1533,6 +1533,28 @@ static int fl_ht_insert_unique(struct cls_fl_filter *fnew,
 	return 0;
 }
 
+static int alloc_fnew(struct net *net, struct cls_fl_filter **f)
+{
+	struct cls_fl_filter *fnew;
+	int err;
+
+	fnew = kzalloc(sizeof(*fnew), GFP_KERNEL);
+	if (!fnew)
+		return -ENOBUFS;
+
+	INIT_LIST_HEAD(&fnew->hw_list);
+	refcount_set(&fnew->refcnt, 1);
+
+	err = tcf_exts_init(&fnew->exts, net, TCA_FLOWER_ACT, 0);
+	if (err < 0) {
+		kfree(fnew);
+		return err;
+	}
+
+	*f = fnew;
+	return 0;
+}
+
 static int fl_change(struct net *net, struct sk_buff *in_skb,
 		     struct tcf_proto *tp, unsigned long base,
 		     u32 handle, struct nlattr **tca,
@@ -1574,17 +1596,9 @@ static int fl_change(struct net *net, struct sk_buff *in_skb,
 		goto errout_tb;
 	}
 
-	fnew = kzalloc(sizeof(*fnew), GFP_KERNEL);
-	if (!fnew) {
-		err = -ENOBUFS;
+	err = alloc_fnew(net, &fnew);
+	if (err)
 		goto errout_tb;
-	}
-	INIT_LIST_HEAD(&fnew->hw_list);
-	refcount_set(&fnew->refcnt, 1);
-
-	err = tcf_exts_init(&fnew->exts, net, TCA_FLOWER_ACT, 0);
-	if (err < 0)
-		goto errout;
 
 	if (tb[TCA_FLOWER_FLAGS]) {
 		fnew->flags = nla_get_u32(tb[TCA_FLOWER_FLAGS]);

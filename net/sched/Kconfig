@@ -716,6 +716,14 @@ config NET_EMATCH_IPT
 	  To compile this code as a module, choose M here: the
 	  module will be called em_ipt.
 
+config NET_CLS_E2E_CACHE
+	tristate "End-to-end cache"
+	depends on NET_CLS_ACT
+        help
+          Say Y here if you want to use traffic control end-2-end cache.
+          End-2-end cache accelerates classification of multi-table rules
+          by merging them to a single rule.
+
 config NET_CLS_ACT
 	bool "Actions"
 	select NET_CLS

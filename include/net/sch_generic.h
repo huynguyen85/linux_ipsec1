@@ -400,6 +400,8 @@ struct tcf_chain {
 	struct rcu_head rcu;
 };
 
+struct tcf_e2e_cache;
+
 struct tcf_block {
 	/* Lock protects tcf_block and lifetime-management data of chains
 	 * attached to the block (refcnt, action_refcnt, explicitly_created).
@@ -425,6 +427,8 @@ struct tcf_block {
 	struct rcu_head rcu;
 	DECLARE_HASHTABLE(proto_destroy_ht, 7);
 	struct mutex proto_destroy_lock; /* Lock for proto_destroy hashtable. */
+
+	struct tcf_e2e_cache *tcf_e2e_cache;
 };
 
 #ifdef CONFIG_PROVE_LOCKING

@@ -544,6 +544,9 @@ int tc_setup_cb_reoffload(struct tcf_block *block, struct tcf_proto *tp,
 			  void *cb_priv, u32 *flags, unsigned int *in_hw_count);
 unsigned int tcf_exts_num_actions(struct tcf_exts *exts);
 
+int tcf_block_create_e2e_cache(struct tcf_block *block);
+void tcf_block_destroy_e2e_cache(struct tcf_block *block);
+
 struct tc_cls_u32_knode {
 	struct tcf_exts *exts;
 	struct tcf_result *res;

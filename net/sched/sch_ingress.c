@@ -18,6 +18,7 @@ struct ingress_sched_data {
 	struct tcf_block *block;
 	struct tcf_block_ext_info block_info;
 	struct mini_Qdisc_pair miniqp;
+	u32 flags;
 };
 
 static struct Qdisc *ingress_leaf(struct Qdisc *sch, unsigned long arg)
@@ -73,12 +74,34 @@ static u32 ingress_ingress_block_get(struct Qdisc *sch)
 	return q->block_info.block_index;
 }
 
+static const struct nla_policy ingress_policy[TCA_INGRESS_ATTR_MAX + 1] = {
+	[TCA_INGRESS_ATTR_FLAGS] = { .type = NLA_U32 },
+};
+
 static int ingress_init(struct Qdisc *sch, struct nlattr *opt,
 			struct netlink_ext_ack *extack)
 {
+	struct nlattr *tb[TCA_INGRESS_ATTR_MAX + 1] = {};
 	struct ingress_sched_data *q = qdisc_priv(sch);
 	struct net_device *dev = qdisc_dev(sch);
 	int err;
+
+	if (opt) {
+		err = nla_parse_nested_deprecated(tb, TCA_INGRESS_ATTR_MAX, opt, ingress_policy,
+						  NULL);
+		if (err < 0)
+			return err;
+	}
+
+	if (tb[TCA_INGRESS_ATTR_FLAGS]) {
+		u32 flags = nla_get_u32(tb[TCA_INGRESS_ATTR_FLAGS]);
+
+		/* Make sure no other flag bits are set. */
+		if (flags & ~(TCA_INGRESS_ATTR_FLAG_CACHEABLE))
+			return false;
+
+		q->flags = flags;
+	}
 
 	net_inc_ingress_queue();
 
@@ -92,14 +115,28 @@ static int ingress_init(struct Qdisc *sch, struct nlattr *opt,
 	if (err)
 		return err;
 
+	if (q->flags & TCA_INGRESS_ATTR_FLAG_CACHEABLE) {
+		err = tcf_block_create_e2e_cache(q->block);
+		if (err)
+			goto err_e2e;
+	}
+
 	mini_qdisc_pair_block_init(&q->miniqp, q->block);
 
 	return 0;
+
+err_e2e:
+	tcf_block_put_ext(q->block, sch, &q->block_info);
+	net_dec_ingress_queue();
+	return err;
 }
 
 static void ingress_destroy(struct Qdisc *sch)
 {
 	struct ingress_sched_data *q = qdisc_priv(sch);
+
+	if (q->flags & TCA_INGRESS_ATTR_FLAG_CACHEABLE)
+		tcf_block_destroy_e2e_cache(q->block);
 
 	tcf_block_put_ext(q->block, sch, &q->block_info);
 	net_dec_ingress_queue();
@@ -107,10 +144,14 @@ static void ingress_destroy(struct Qdisc *sch)
 
 static int ingress_dump(struct Qdisc *sch, struct sk_buff *skb)
 {
+	struct ingress_sched_data *q = qdisc_priv(sch);
 	struct nlattr *nest;
 
 	nest = nla_nest_start_noflag(skb, TCA_OPTIONS);
 	if (nest == NULL)
+		goto nla_put_failure;
+
+	if (q->flags && nla_put_u32(skb, TCA_INGRESS_ATTR_FLAGS, q->flags))
 		goto nla_put_failure;
 
 	return nla_nest_end(skb, nest);

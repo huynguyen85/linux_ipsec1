@@ -40,6 +40,7 @@
 #include <net/tc_act/tc_ct.h>
 #include <net/tc_act/tc_mpls.h>
 #include <net/flow_offload.h>
+#include <net/e2e_cache_api.h>
 
 extern const struct nla_policy rtm_tca_policy[TCA_MAX + 1];
 
@@ -345,8 +346,9 @@ struct tcf_filter_chain_list_item {
 	void *chain_head_change_priv;
 };
 
-static struct tcf_chain *tcf_chain_create(struct tcf_block *block,
-					  u32 chain_index)
+static struct tcf_chain *__tcf_chain_create(struct tcf_block *block,
+					    u32 chain_index,
+					    bool is_e2e_cache_chain)
 {
 	struct tcf_chain *chain;
 
@@ -355,14 +357,22 @@ static struct tcf_chain *tcf_chain_create(struct tcf_block *block,
 	chain = kzalloc(sizeof(*chain), GFP_KERNEL);
 	if (!chain)
 		return NULL;
-	list_add_tail_rcu(&chain->list, &block->chain_list);
+	if (!is_e2e_cache_chain)
+		list_add_tail_rcu(&chain->list, &block->chain_list);
 	mutex_init(&chain->filter_chain_lock);
 	chain->block = block;
 	chain->index = chain_index;
 	chain->refcnt = 1;
-	if (!chain->index)
+	chain->is_e2e_cache_chain = is_e2e_cache_chain;
+	if (!chain->index && !is_e2e_cache_chain)
 		block->chain0.chain = chain;
 	return chain;
+}
+
+static struct tcf_chain *tcf_chain_create(struct tcf_block *block,
+					  u32 chain_index)
+{
+	return __tcf_chain_create(block, chain_index, false);
 }
 
 static void tcf_chain_head_change_item(struct tcf_filter_chain_list_item *item,
@@ -378,7 +388,7 @@ static void tcf_chain0_head_change(struct tcf_chain *chain,
 	struct tcf_filter_chain_list_item *item;
 	struct tcf_block *block = chain->block;
 
-	if (chain->index)
+	if (chain->index || chain->is_e2e_cache_chain)
 		return;
 
 	mutex_lock(&block->lock);
@@ -395,9 +405,11 @@ static bool tcf_chain_detach(struct tcf_chain *chain)
 
 	ASSERT_BLOCK_LOCKED(block);
 
-	list_del_rcu(&chain->list);
-	if (!chain->index)
-		block->chain0.chain = NULL;
+	if (!chain->is_e2e_cache_chain) {
+		list_del_rcu(&chain->list);
+		if (!chain->index)
+			block->chain0.chain = NULL;
+	}
 
 	if (list_empty(&block->chain_list) &&
 	    refcount_read(&block->refcnt) == 0)
@@ -3669,6 +3681,45 @@ unsigned int tcf_exts_num_actions(struct tcf_exts *exts)
 	return num_acts;
 }
 EXPORT_SYMBOL(tcf_exts_num_actions);
+
+int tcf_block_create_e2e_cache(struct tcf_block *block)
+{
+	struct tcf_e2e_cache *tcf_e2e_cache;
+	struct tcf_chain *chain;
+	int err;
+
+	mutex_lock(&block->lock);
+	chain = __tcf_chain_create(block, 0, true);
+	mutex_unlock(&block->lock);
+
+	if (!chain)
+		return -ENOMEM;
+
+	tcf_e2e_cache = e2e_cache_create(chain);
+	if (IS_ERR(tcf_e2e_cache))
+		goto err_create;
+
+	block->tcf_e2e_cache = tcf_e2e_cache;
+	block->tcf_e2e_chain = chain;
+
+	return 0;
+
+err_create:
+	tcf_chain_put(block->tcf_e2e_chain);
+	return err;
+}
+EXPORT_SYMBOL(tcf_block_create_e2e_cache);
+
+void tcf_block_destroy_e2e_cache(struct tcf_block *block)
+{
+	e2e_cache_destroy(block->tcf_e2e_cache);
+	block->tcf_e2e_cache = NULL;
+
+	tcf_chain_flush(block->tcf_e2e_chain, true);
+	tcf_chain_put(block->tcf_e2e_chain);
+	block->tcf_e2e_chain = NULL;
+}
+EXPORT_SYMBOL(tcf_block_destroy_e2e_cache);
 
 static __net_init int tcf_net_init(struct net *net)
 {

@@ -395,6 +395,7 @@ struct tcf_chain {
 	unsigned int action_refcnt;
 	bool explicitly_created;
 	bool flushing;
+	bool is_e2e_cache_chain;
 	const struct tcf_proto_ops *tmplt_ops;
 	void *tmplt_priv;
 	struct rcu_head rcu;
@@ -429,6 +430,7 @@ struct tcf_block {
 	struct mutex proto_destroy_lock; /* Lock for proto_destroy hashtable. */
 
 	struct tcf_e2e_cache *tcf_e2e_cache;
+	struct tcf_chain *tcf_e2e_chain;
 };
 
 #ifdef CONFIG_PROVE_LOCKING

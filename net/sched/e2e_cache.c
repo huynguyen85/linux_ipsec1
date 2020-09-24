@@ -7,27 +7,32 @@
 #include <net/e2e_cache_api.h>
 
 struct tcf_e2e_cache {
+	struct tcf_chain *tcf_e2e_chain;
 };
 
 static struct tcf_e2e_cache *
-e2e_cache_create_impl(void)
+e2e_cache_create_impl(struct tcf_chain *tcf_e2e_chain)
 {
-	struct tcf_e2e_cache *e2e_cache;
+	struct tcf_e2e_cache *tcf_e2e_cache;
 
-	e2e_cache = kzalloc(sizeof(*e2e_cache), GFP_KERNEL);
-	if (!e2e_cache)
+	tcf_e2e_cache = kzalloc(sizeof(*tcf_e2e_cache), GFP_KERNEL);
+	if (!tcf_e2e_cache)
 		return ERR_PTR(-ENOMEM);
 
 	__module_get(THIS_MODULE);
 
-	return e2e_cache;
+	tcf_e2e_cache->tcf_e2e_chain = tcf_e2e_chain;
+	pr_debug("chain=0x%p\n", tcf_e2e_chain);
+
+	return tcf_e2e_cache;
 }
 
 static void
-e2e_cache_destroy_impl(struct tcf_e2e_cache *e2e_cache)
+e2e_cache_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache)
 {
 	module_put(THIS_MODULE);
-	kfree(e2e_cache);
+	kfree(tcf_e2e_cache);
+	pr_debug("Cache destroyed\n");
 }
 
 static struct e2e_cache_ops e2e_cache_ops = {

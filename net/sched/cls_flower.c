@@ -1555,64 +1555,17 @@ static int alloc_fnew(struct net *net, struct cls_fl_filter **f)
 	return 0;
 }
 
-static int fl_change(struct net *net, struct sk_buff *in_skb,
-		     struct tcf_proto *tp, unsigned long base,
-		     u32 handle, struct nlattr **tca,
-		     void **arg, bool ovr, bool rtnl_held,
+static int fl_insert(struct tcf_proto *tp,
+		     struct cls_fl_filter *fold,
+		     struct cls_fl_filter *fnew,
+		     struct fl_flow_mask *mask,
+		     u32 handle,
+		     bool rtnl_held,
 		     struct netlink_ext_ack *extack)
 {
 	struct cls_fl_head *head = fl_head_dereference(tp);
-	struct cls_fl_filter *fold = *arg;
-	struct cls_fl_filter *fnew;
-	struct fl_flow_mask *mask;
-	struct nlattr **tb;
 	bool in_ht;
 	int err;
-
-	if (!tca[TCA_OPTIONS]) {
-		err = -EINVAL;
-		goto errout_fold;
-	}
-
-	mask = kzalloc(sizeof(struct fl_flow_mask), GFP_KERNEL);
-	if (!mask) {
-		err = -ENOBUFS;
-		goto errout_fold;
-	}
-
-	tb = kcalloc(TCA_FLOWER_MAX + 1, sizeof(struct nlattr *), GFP_KERNEL);
-	if (!tb) {
-		err = -ENOBUFS;
-		goto errout_mask_alloc;
-	}
-
-	err = nla_parse_nested_deprecated(tb, TCA_FLOWER_MAX,
-					  tca[TCA_OPTIONS], fl_policy, NULL);
-	if (err < 0)
-		goto errout_tb;
-
-	if (fold && handle && fold->handle != handle) {
-		err = -EINVAL;
-		goto errout_tb;
-	}
-
-	err = alloc_fnew(net, &fnew);
-	if (err)
-		goto errout_tb;
-
-	if (tb[TCA_FLOWER_FLAGS]) {
-		fnew->flags = nla_get_u32(tb[TCA_FLOWER_FLAGS]);
-
-		if (!tc_flags_valid(fnew->flags)) {
-			err = -EINVAL;
-			goto errout;
-		}
-	}
-
-	err = fl_set_parms(net, tp, fnew, mask, base, tb, tca[TCA_RATE], ovr,
-			   tp->chain->tmplt_priv, rtnl_held, extack);
-	if (err)
-		goto errout;
 
 	err = fl_check_assign_mask(head, fnew, fold, mask);
 	if (err)
@@ -1709,10 +1662,6 @@ static int fl_change(struct net *net, struct sk_buff *in_skb,
 		spin_unlock(&tp->lock);
 	}
 
-	*arg = fnew;
-
-	kfree(tb);
-	tcf_queue_work(&mask->rwork, fl_uninit_mask_free_work);
 	return 0;
 
 errout_ht:
@@ -1727,6 +1676,77 @@ errout_hw:
 				       fnew->mask->filter_ht_params);
 errout_mask:
 	fl_mask_put(head, fnew->mask);
+errout:
+	return err;
+}
+
+static int fl_change(struct net *net, struct sk_buff *in_skb,
+		     struct tcf_proto *tp, unsigned long base,
+		     u32 handle, struct nlattr **tca,
+		     void **arg, bool ovr, bool rtnl_held,
+		     struct netlink_ext_ack *extack)
+{
+	struct cls_fl_filter *fold = *arg;
+	struct cls_fl_filter *fnew;
+	struct fl_flow_mask *mask;
+	struct nlattr **tb;
+	int err;
+
+	if (!tca[TCA_OPTIONS]) {
+		err = -EINVAL;
+		goto errout_fold;
+	}
+
+	mask = kzalloc(sizeof(*mask), GFP_KERNEL);
+	if (!mask) {
+		err = -ENOBUFS;
+		goto errout_fold;
+	}
+
+	tb = kcalloc(TCA_FLOWER_MAX + 1, sizeof(struct nlattr *), GFP_KERNEL);
+	if (!tb) {
+		err = -ENOBUFS;
+		goto errout_mask_alloc;
+	}
+
+	err = nla_parse_nested_deprecated(tb, TCA_FLOWER_MAX,
+					  tca[TCA_OPTIONS], fl_policy, NULL);
+	if (err < 0)
+		goto errout_tb;
+
+	if (fold && handle && fold->handle != handle) {
+		err = -EINVAL;
+		goto errout_tb;
+	}
+
+	err = alloc_fnew(net, &fnew);
+	if (err)
+		goto errout_tb;
+
+	if (tb[TCA_FLOWER_FLAGS]) {
+		fnew->flags = nla_get_u32(tb[TCA_FLOWER_FLAGS]);
+
+		if (!tc_flags_valid(fnew->flags)) {
+			err = -EINVAL;
+			goto errout;
+		}
+	}
+
+	err = fl_set_parms(net, tp, fnew, mask, base, tb, tca[TCA_RATE], ovr,
+			   tp->chain->tmplt_priv, rtnl_held, extack);
+	if (err)
+		goto errout;
+
+	err = fl_insert(tp, fold, fnew, mask, handle, rtnl_held, extack);
+	if (err)
+		goto errout;
+
+	*arg = fnew;
+
+	kfree(tb);
+	tcf_queue_work(&mask->rwork, fl_uninit_mask_free_work);
+	return 0;
+
 errout:
 	__fl_put(fnew);
 errout_tb:

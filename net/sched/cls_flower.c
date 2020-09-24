@@ -19,9 +19,12 @@
 
 #include <net/sch_generic.h>
 #include <net/pkt_cls.h>
+#include <net/tc_act/tc_pedit.h>
 #include <net/ip.h>
+#include <net/e2e_cache_api.h>
 #include <net/flow_dissector.h>
 #include <net/geneve.h>
+#include <net/netfilter/nf_conntrack.h>
 
 #include <net/dst.h>
 #include <net/dst_metadata.h>
@@ -1759,6 +1762,190 @@ errout_fold:
 	return err;
 }
 
+static int fl_set_key_from_tuple(struct flow_offload_tuple *tuple,
+				 struct fl_flow_key *key, struct fl_flow_key *mask)
+{
+	switch (tuple->l3proto) {
+	case AF_INET:
+		key->control.addr_type = FLOW_DISSECTOR_KEY_IPV4_ADDRS;
+		key->basic.n_proto = htons(ETH_P_IP);
+		key->ipv4.src = tuple->src_v4.s_addr;
+		mask->ipv4.src = 0xffffffff;
+		key->ipv4.dst = tuple->dst_v4.s_addr;
+		mask->ipv4.dst = 0xffffffff;
+		break;
+	case AF_INET6:
+		key->control.addr_type = FLOW_DISSECTOR_KEY_IPV6_ADDRS;
+		key->basic.n_proto = htons(ETH_P_IPV6);
+		key->ipv6.src = tuple->src_v6;
+		memset(&mask->ipv6.src, 0xff, sizeof(mask->ipv6.src));
+		key->ipv6.dst = tuple->dst_v6;
+		memset(&mask->ipv6.dst, 0xff, sizeof(mask->ipv6.dst));
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	mask->control.addr_type = 0xffff;
+	mask->basic.n_proto = 0xffff;
+
+	switch (tuple->l4proto) {
+	case IPPROTO_TCP:
+		key->tcp.flags = 0;
+		mask->tcp.flags = cpu_to_be16(be32_to_cpu(TCP_FLAG_RST | TCP_FLAG_FIN) >> 16);
+		break;
+	case IPPROTO_UDP:
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	key->basic.ip_proto = tuple->l4proto;
+	mask->basic.ip_proto = 0xff;
+	key->tp.src = tuple->src_port;
+	mask->tp.src = 0xffff;
+	key->tp.dst = tuple->dst_port;
+	mask->tp.dst = 0xffff;
+
+	return 0;
+}
+
+static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
+		    void **arg)
+{
+	struct e2e_cache_trace_entry *entry = &trace->entries[0];
+	struct cls_fl_filter *fnew, *last_f = NULL;
+	struct netlink_ext_ack extack = {};
+	struct flow_offload_tuple *tuple;
+	struct fl_flow_mask *mask;
+	struct fl_flow_key *mkey;
+	struct tc_action *act;
+	bool skip_hw = false;
+	int err, i;
+
+	if (entry->type != E2E_CACHE_TRACE_CT)
+		return -EOPNOTSUPP;
+
+	tuple = &entry->flow->tuplehash[entry->dir].tuple;
+
+	mask = kzalloc(sizeof(*mask), GFP_KERNEL);
+	if (!mask)
+		return -ENOMEM;
+
+	mkey = kzalloc(sizeof(*mkey), GFP_KERNEL);
+	if (!mkey) {
+		err = -ENOMEM;
+		goto errout_mask;
+	}
+
+	for (i = 0; i < trace->num_entries; i++) {
+		struct cls_fl_filter *f;
+		u32 *dst, *src, tmp;
+		int j;
+
+		entry = &trace->entries[i];
+
+		if (entry->type == E2E_CACHE_TRACE_CT) {
+			struct nf_conn *ct = entry->flow->ct;
+
+			if (ct->status & IPS_DST_NAT || ct->status & IPS_SRC_NAT) {
+				err = -EOPNOTSUPP;
+				goto errout_mkey;
+			}
+
+			continue;
+		}
+
+		if (entry->type != E2E_CACHE_TRACE_TP)
+			continue;
+
+		f = entry->fh;
+
+		if (tc_skip_hw(f->flags))
+			skip_hw = true;
+
+		tcf_exts_for_each_action(j, act, &f->exts) {
+			if (is_tcf_pedit(act)) {
+				err = -EOPNOTSUPP;
+				goto errout_mkey;
+			}
+		}
+
+		/* merge match */
+		dst = (u32 *)mkey;
+		src = (u32 *)&f->mkey;
+		for (j = 0; j < sizeof(struct fl_flow_key) / sizeof(u32); j++) {
+			tmp = ~*dst;
+			*dst++ |= (*src++ & tmp);
+		}
+
+		/* merge mask */
+		dst = (u32 *)&mask->key;
+		src = (u32 *)&f->mask->key;
+		for (j = 0; j < sizeof(struct fl_flow_key) / sizeof(u32); j++) {
+			tmp = ~*dst;
+			*dst++ |= (*src++ & tmp);
+		}
+
+		last_f = f;
+	}
+
+	if (!last_f) {
+		err = -EINVAL;
+		goto errout_mkey;
+	}
+
+	err = alloc_fnew(last_f->exts.net, &fnew);
+	if (err)
+		goto errout_mkey;
+
+	/* clear ct state matching */
+	memset(&mkey->ct, 0, sizeof(mkey->ct));
+	memset(&mask->key.ct, 0, sizeof(mkey->ct));
+
+	err = fl_set_key_from_tuple(tuple, mkey, &mask->key);
+	if (err)
+		goto errout;
+
+	memcpy(&fnew->mkey, mkey, sizeof(*mkey));
+	memcpy(&fnew->key, mkey, sizeof(*mkey));
+
+	fl_mask_update_range(mask);
+
+	if (skip_hw)
+		fnew->flags |= TCA_CLS_FLAGS_SKIP_HW;
+
+	/* set actions */
+	fnew->exts.nr_actions = last_f->exts.nr_actions;
+
+	/* copy actions */
+	tcf_exts_for_each_action(i, act, &last_f->exts) {
+		tcf_action_get(act);
+		fnew->exts.actions[fnew->exts.nr_actions++] = act;
+	}
+
+	err = fl_insert(tp, NULL, fnew, mask, 0, false, &extack);
+	if (extack._msg)
+		pr_debug("extack msg: %s\n", extack._msg);
+	if (err)
+		goto errout;
+
+	*arg = fnew;
+
+	kfree(mkey);
+	tcf_queue_work(&mask->rwork, fl_uninit_mask_free_work);
+	return 0;
+
+errout:
+	__fl_put(fnew);
+errout_mkey:
+	kfree(mkey);
+errout_mask:
+	tcf_queue_work(&mask->rwork, fl_uninit_mask_free_work);
+
+	return err;
+}
+
 static int fl_delete(struct tcf_proto *tp, void *arg, bool *last,
 		     bool rtnl_held, struct netlink_ext_ack *extack)
 {
@@ -2588,6 +2775,7 @@ static struct tcf_proto_ops cls_fl_ops __read_mostly = {
 	.take		= fl_take,
 	.put		= fl_put,
 	.change		= fl_change,
+	.merge		= fl_merge,
 	.delete		= fl_delete,
 	.delete_empty	= fl_delete_empty,
 	.walk		= fl_walk,

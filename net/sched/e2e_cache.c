@@ -457,9 +457,12 @@ trace_failed:
 static void
 e2e_cache_entry_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_entry *entry)
 {
-	/* delete fh using entry->tp->ops->delete(...., &last), and if last delete tp */
-	/* for now we only have one entry */
+	struct tcf_proto *tp = tcf_e2e_cache->tp;
+	bool last;
 
+	tp->ops->delete(tp, entry->merged_fh, &last, true, NULL);
+
+	/* for now we only have one entry so no need to check last */
 	kfree(tcf_e2e_cache->entry);
 	tcf_e2e_cache->entry = NULL;
 

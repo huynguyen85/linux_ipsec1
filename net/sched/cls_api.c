@@ -1942,6 +1942,10 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 		dump_flags.selector |= TCA_DUMP_FLAGS_TERSE;
 		dump_flags.value |= TCA_DUMP_FLAGS_TERSE;
 	}
+	if (tp->chain->is_e2e_cache_chain) {
+		dump_flags.selector |= TCA_DUMP_FLAGS_E2E_CACHE;
+		dump_flags.value |= TCA_DUMP_FLAGS_E2E_CACHE;
+	}
 
 	if (nla_put_string(skb, TCA_KIND, tp->ops->kind))
 		goto nla_put_failure;
@@ -2656,7 +2660,8 @@ errout:
 }
 
 static const struct nla_policy tcf_tfilter_dump_policy[TCA_MAX + 1] = {
-	[TCA_DUMP_FLAGS] = NLA_POLICY_BITFIELD32(TCA_DUMP_FLAGS_TERSE),
+	[TCA_DUMP_FLAGS] = NLA_POLICY_BITFIELD32(TCA_DUMP_FLAGS_TERSE |
+						 TCA_DUMP_FLAGS_E2E_CACHE),
 };
 
 /* called with RTNL */
@@ -2669,6 +2674,7 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 	struct tcf_block *block;
 	struct tcmsg *tcm = nlmsg_data(cb->nlh);
 	bool terse_dump = false;
+	bool e2e_cache_dump = false;
 	long index_start;
 	long index;
 	u32 parent;
@@ -2687,6 +2693,7 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 			nla_get_bitfield32(tca[TCA_DUMP_FLAGS]);
 
 		terse_dump = flags.value & TCA_DUMP_FLAGS_TERSE;
+		e2e_cache_dump = flags.value & TCA_DUMP_FLAGS_E2E_CACHE;
 	}
 
 	if (tcm->tcm_ifindex == TCM_IFINDEX_MAGIC_BLOCK) {
@@ -2737,19 +2744,28 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 	index_start = cb->args[0];
 	index = 0;
 
-	for (chain = __tcf_get_next_chain(block, NULL);
-	     chain;
-	     chain_prev = chain,
-		     chain = __tcf_get_next_chain(block, chain),
-		     tcf_chain_put(chain_prev)) {
-		if (tca[TCA_CHAIN] &&
-		    nla_get_u32(tca[TCA_CHAIN]) != chain->index)
-			continue;
-		if (!tcf_chain_dump(chain, q, parent, skb, cb,
-				    index_start, &index, terse_dump)) {
-			tcf_chain_put(chain);
+	if (e2e_cache_dump && block->tcf_e2e_cache) {
+		if ((!tca[TCA_CHAIN] || nla_get_u32(tca[TCA_CHAIN]) == 0) &&
+		    !tcf_chain_dump(block->tcf_e2e_chain, q, parent, skb, cb, index_start,
+				    &index, terse_dump))
 			err = -EMSGSIZE;
-			break;
+	}
+
+	if (!e2e_cache_dump) {
+		for (chain = __tcf_get_next_chain(block, NULL);
+		     chain;
+		     chain_prev = chain,
+			     chain = __tcf_get_next_chain(block, chain),
+			     tcf_chain_put(chain_prev)) {
+			if (tca[TCA_CHAIN] &&
+			    nla_get_u32(tca[TCA_CHAIN]) != chain->index)
+				continue;
+			if (!tcf_chain_dump(chain, q, parent, skb, cb,
+					    index_start, &index, terse_dump)) {
+				tcf_chain_put(chain);
+				err = -EMSGSIZE;
+				break;
+			}
 		}
 	}
 

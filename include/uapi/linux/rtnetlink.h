@@ -603,6 +603,7 @@ enum {
 				       * data necessary to identify the objects
 				       * (handle, cookie, etc.) and stats.
 				       */
+#define TCA_DUMP_FLAGS_E2E_CACHE (1 << 1) /* Dumps e2e_cache chain */
 
 #define TCA_RTA(r)  ((struct rtattr*)(((char*)(r)) + NLMSG_ALIGN(sizeof(struct tcmsg))))
 #define TCA_PAYLOAD(n) NLMSG_PAYLOAD(n,sizeof(struct tcmsg))

@@ -19,9 +19,8 @@
 #include <linux/skbuff.h>
 #include <net/netfilter/nf_conntrack.h>
 
-struct tcf_e2e_cache {
-	struct tcf_chain *tcf_e2e_chain;
-};
+/* Number of reclassify + single CT per classify */
+#define E2E_CACHE_MAX_TRACE_ENTRIES (TCF_MAX_RECLASSIFY_LOOP * 2)
 
 enum {
 	E2E_CACHE_TRACE_CACHEABLE  = BIT(0),
@@ -80,12 +79,27 @@ struct e2e_cache_trace {
 	int num_conns;
 	u32 hash;
 
+	__be16 protocol;
+
 	struct tcf_e2e_cache *tcf_e2e_cache;
 
 	struct work_struct work;
 };
 
 #define E2E_TRACING_BM_SIZE (1 << 23)
+
+struct e2e_cache_entry {
+	struct e2e_cache_trace_entry entries[E2E_CACHE_MAX_TRACE_ENTRIES];
+	int num_entries;
+
+	void *merged_fh;
+};
+
+struct tcf_e2e_cache {
+	struct tcf_chain *tcf_e2e_chain;
+	struct tcf_proto *tp;
+	struct e2e_cache_entry *entry;
+};
 
 static DEFINE_PER_CPU(struct e2e_cache_trace *, packet_trace);
 static DECLARE_BITMAP(e2e_tracing_bm, E2E_TRACING_BM_SIZE) = {0};
@@ -206,6 +220,14 @@ e2e_cache_unmark_tracing(u32 hash)
 	clear_bit(hash, e2e_tracing_bm);
 }
 
+static void
+e2e_cache_destroy_tp(struct tcf_e2e_cache *tcf_e2e_cache)
+{
+	tcf_chain_tp_delete_empty(tcf_e2e_cache->tcf_e2e_chain, tcf_e2e_cache->tp);
+	tcf_proto_put(tcf_e2e_cache->tp, true, NULL);
+	tcf_e2e_cache->tp = NULL;
+}
+
 static void e2e_cache_trace_release(struct e2e_cache_trace *trace)
 {
 	int i;
@@ -230,8 +252,45 @@ static void e2e_cache_trace_process_work(struct work_struct *work)
 	struct e2e_cache_trace *trace = container_of(work,
 						     struct e2e_cache_trace,
 						     work);
+	struct tcf_e2e_cache *tcf_e2e_cache = trace->tcf_e2e_cache;
+	struct e2e_cache_entry *merged_entry;
+	bool tp_created = false;
 
 	pr_debug("process work\n");
+
+	if (!tcf_e2e_cache->tp) {
+		struct tcf_proto *tp;
+
+		tp = tcf_proto_create_and_insert(trace->ops->kind, ETH_P_ALL , 1 << 16,
+						 tcf_e2e_cache->tcf_e2e_chain);
+		if (IS_ERR(tp))
+			goto err_out;
+
+		pr_debug("created %s tp for proto 0x%x\n", trace->ops->kind
+							 , trace->protocol);
+		tcf_e2e_cache->tp = tp;
+		tp_created = true;
+	}
+
+	/* Only room for one tp kind for now */
+	if (tcf_e2e_cache->tp->ops != trace->ops)
+		goto err_out;
+
+	merged_entry = kzalloc(sizeof(*merged_entry), GFP_KERNEL);
+	if (!merged_entry)
+		goto err_out;
+
+	memcpy(&merged_entry->entries, &trace->entries, sizeof(trace->entries));
+	merged_entry->num_entries = trace->num_entries;
+
+	//tp->merge() here and save merged_fh in entry
+	tcf_e2e_cache->entry = merged_entry;
+
+	return;
+
+err_out:
+	if (tp_created)
+		tcf_proto_put(tcf_e2e_cache->tp, true, NULL);
 	e2e_cache_trace_release(trace);
 }
 
@@ -276,6 +335,7 @@ e2e_cache_trace_begin_impl(struct tcf_e2e_cache *tcf_e2e_cache, struct sk_buff *
 	memset(*trace, 0, sizeof(**trace));
 
 	(*trace)->flags = E2E_CACHE_TRACE_CACHEABLE;
+	(*trace)->tcf_e2e_cache = tcf_e2e_cache;
 	(*trace)->hash = hash;
 	(*trace)->tcf_e2e_cache = tcf_e2e_cache;
 }
@@ -310,10 +370,10 @@ e2e_cache_trace_tp_impl(struct sk_buff *skb,
 	/* trace only classifiers of the same kind */
 	if (!trace->ops) {
 		trace->ops = tp->ops;
-
 		/* trace only classifier supporting cache related ops */
 		if (!tp->ops->take || !tp->ops->put)
 			goto not_cacheable;
+		trace->protocol = tp->protocol;
 	} else if (trace->ops != tp->ops) {
 		pr_debug("trace=0x%p diff ops: 0x%p 0x%p\n", trace, trace->ops, tp->ops);
 		goto not_cacheable;
@@ -401,6 +461,18 @@ trace_failed:
 }
 
 static void
+e2e_cache_entry_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_entry *entry)
+{
+	/* delete fh using entry->tp->ops->delete(...., &last), and if last delete tp */
+	/* for now we only have one entry */
+
+	kfree(tcf_e2e_cache->entry);
+	tcf_e2e_cache->entry = NULL;
+
+	e2e_cache_destroy_tp(tcf_e2e_cache);
+}
+
+static void
 e2e_cache_trace_ct_impl(struct flow_offload *flow, int dir)
 {
 	struct e2e_cache_trace *trace = *this_cpu_ptr(&packet_trace);
@@ -429,12 +501,23 @@ e2e_cache_filter_delete_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 			     const struct tcf_proto *tp,
 			     void *fh)
 {
+	/* TODO: Check all trace filters tp and fhs */
+	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[0].tp != tp ||
+	    tcf_e2e_cache->entry->entries[0].fh != fh)
+		return;
+
+	e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
 }
 
 static void
 e2e_cache_tp_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 			  const struct tcf_proto *tp)
 {
+	/* TODO: Check all trace filters tps */
+	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[0].tp != tp)
+		return;
+
+	e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
 }
 
 static struct tcf_e2e_cache *
@@ -457,6 +540,9 @@ e2e_cache_create_impl(struct tcf_chain *tcf_e2e_chain)
 static void
 e2e_cache_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache)
 {
+	if (tcf_e2e_cache->entry)
+		e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
+
 	module_put(THIS_MODULE);
 	kfree(tcf_e2e_cache);
 	pr_debug("Cache destroyed\n");

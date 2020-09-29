@@ -1798,9 +1798,42 @@ static struct tcf_proto *tcf_chain_tp_insert_unique(struct tcf_chain *chain,
 	return tp_new;
 }
 
-static void tcf_chain_tp_delete_empty(struct tcf_chain *chain,
-				      struct tcf_proto *tp, bool rtnl_held,
-				      struct netlink_ext_ack *extack)
+struct tcf_proto *__tcf_proto_create_and_insert(const char *kind, u32 protocol, u32 prio,
+						struct tcf_chain *chain, bool rtnl_held,
+						struct netlink_ext_ack *extack,
+						int *tp_created)
+{
+	struct tcf_proto *tp;
+
+	tp = tcf_proto_create(kind, protocol, prio, chain, rtnl_held, extack);
+	if (IS_ERR(tp))
+		return tp;
+
+	*tp_created = 1;
+	tp = tcf_chain_tp_insert_unique(chain, tp, protocol, prio, rtnl_held);
+	return tp;
+}
+
+struct tcf_proto *tcf_proto_create_and_insert(const char *kind, u32 protocol, u32 prio,
+					      struct tcf_chain *chain)
+{
+	struct tcf_proto *tp;
+	int tp_created = 0;
+
+	mutex_lock(&chain->block->lock);
+	tcf_chain_hold(chain);
+	mutex_unlock(&chain->block->lock);
+
+	tp = __tcf_proto_create_and_insert(kind, protocol, prio, chain, true, NULL, &tp_created);
+	if (IS_ERR(tp))
+		tcf_chain_put(chain);
+	return tp;
+}
+EXPORT_SYMBOL(tcf_proto_create_and_insert);
+
+static void __tcf_chain_tp_delete_empty(struct tcf_chain *chain,
+					struct tcf_proto *tp, bool rtnl_held,
+					struct netlink_ext_ack *extack)
 {
 	struct tcf_chain_info chain_info;
 	struct tcf_proto *tp_iter;
@@ -1838,6 +1871,12 @@ static void tcf_chain_tp_delete_empty(struct tcf_chain *chain,
 
 	tcf_proto_put(tp, rtnl_held, extack);
 }
+
+void tcf_chain_tp_delete_empty(struct tcf_chain *chain, struct tcf_proto *tp)
+{
+	__tcf_chain_tp_delete_empty(chain, tp, true, NULL);
+}
+EXPORT_SYMBOL(tcf_chain_tp_delete_empty);
 
 static struct tcf_proto *tcf_chain_tp_find(struct tcf_chain *chain,
 					   struct tcf_chain_info *chain_info,
@@ -2152,20 +2191,14 @@ replay:
 							       &chain_info));
 
 		mutex_unlock(&chain->filter_chain_lock);
-		tp_new = tcf_proto_create(name, protocol, prio, chain,
-					  rtnl_held, extack);
+		tp_new = __tcf_proto_create_and_insert(name, protocol, prio, chain, rtnl_held, extack,
+						       &tp_created);
 		if (IS_ERR(tp_new)) {
 			err = PTR_ERR(tp_new);
 			goto errout_tp;
 		}
 
-		tp_created = 1;
-		tp = tcf_chain_tp_insert_unique(chain, tp_new, protocol, prio,
-						rtnl_held);
-		if (IS_ERR(tp)) {
-			err = PTR_ERR(tp);
-			goto errout_tp;
-		}
+		tp = tp_new;
 	} else {
 		mutex_unlock(&chain->filter_chain_lock);
 	}
@@ -2211,7 +2244,7 @@ replay:
 
 errout:
 	if (err && tp_created)
-		tcf_chain_tp_delete_empty(chain, tp, rtnl_held, NULL);
+		__tcf_chain_tp_delete_empty(chain, tp, rtnl_held, NULL);
 errout_tp:
 	if (chain) {
 		if (tp && !IS_ERR(tp))
@@ -2378,7 +2411,7 @@ static int tc_del_tfilter(struct sk_buff *skb, struct nlmsghdr *n,
 		if (err)
 			goto errout;
 		if (last)
-			tcf_chain_tp_delete_empty(chain, tp, rtnl_held, extack);
+			__tcf_chain_tp_delete_empty(chain, tp, rtnl_held, extack);
 	}
 
 errout:

@@ -290,6 +290,7 @@ struct tcf_result {
 };
 
 struct tcf_chain;
+struct e2e_cache_trace_data;
 
 struct tcf_proto_ops {
 	struct list_head	head;
@@ -310,6 +311,9 @@ struct tcf_proto_ops {
 					u32 handle, struct nlattr **,
 					void **, bool, bool,
 					struct netlink_ext_ack *);
+	int			(*merge)(struct tcf_proto *tp,
+					 struct e2e_cache_trace_data *trace,
+					 void **arg);
 	int			(*delete)(struct tcf_proto *tp, void *arg,
 					  bool *last, bool rtnl_held,
 					  struct netlink_ext_ack *);

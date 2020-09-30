@@ -8,6 +8,33 @@
 
 struct tcf_e2e_cache;
 
+enum e2e_cache_trace_type {
+	E2E_CACHE_TRACE_TP,
+	E2E_CACHE_TRACE_CT,
+};
+
+struct e2e_cache_trace_entry {
+	enum e2e_cache_trace_type type;
+
+	union {
+		struct { /* tp entry */
+			struct tcf_proto *tp;
+			void *fh;
+		};
+
+		struct { /* ct entry */
+			struct flow_offload *flow;
+			int dir;
+		};
+	};
+};
+
+struct e2e_cache_trace_data {
+	struct e2e_cache_trace_entry 	*entries;
+	int 				num_entries;
+	__be16				protocol;
+};
+
 struct e2e_cache_ops {
 	struct tcf_e2e_cache*	(*create)(struct tcf_chain *tcf_e2e_chain);
 	void			(*destroy)(struct tcf_e2e_cache *tcf_e2e_cache);

@@ -29,27 +29,6 @@ enum {
 /* Number of reclassify + single CT per classify */
 #define E2E_CACHE_MAX_TRACE_ENTRIES (TCF_MAX_RECLASSIFY_LOOP * 2)
 
-enum e2e_cache_trace_type {
-	E2E_CACHE_TRACE_TP,
-	E2E_CACHE_TRACE_CT,
-};
-
-struct e2e_cache_trace_entry {
-	enum e2e_cache_trace_type type;
-
-	union {
-		struct { /* tp entry */
-			struct tcf_proto *tp;
-			void *fh;
-		};
-
-		struct { /* ct entry */
-			struct flow_offload *flow;
-			int dir;
-		};
-	};
-};
-
 struct e2e_cache_tuple {
 	union {
 		struct in_addr          src_v4;
@@ -253,8 +232,11 @@ static void e2e_cache_trace_process_work(struct work_struct *work)
 						     struct e2e_cache_trace,
 						     work);
 	struct tcf_e2e_cache *tcf_e2e_cache = trace->tcf_e2e_cache;
+	struct e2e_cache_trace_data trace_data;
 	struct e2e_cache_entry *merged_entry;
 	bool tp_created = false;
+	void *merged_fh;
+	int err;
 
 	pr_debug("process work\n");
 
@@ -276,15 +258,27 @@ static void e2e_cache_trace_process_work(struct work_struct *work)
 	if (tcf_e2e_cache->tp->ops != trace->ops)
 		goto err_out;
 
+	/* call the classifier's merge */
+	trace_data.entries = trace->entries;
+	trace_data.num_entries = trace->num_entries;
+	trace_data.protocol = trace->protocol;
+
+	err = trace->ops->merge(tcf_e2e_cache->tp, &trace_data, &merged_fh);
+	if (err) {
+		pr_debug("merge failed, err %d\n", err);
+		goto err_out;
+	}
+
 	merged_entry = kzalloc(sizeof(*merged_entry), GFP_KERNEL);
 	if (!merged_entry)
 		goto err_out;
 
 	memcpy(&merged_entry->entries, &trace->entries, sizeof(trace->entries));
 	merged_entry->num_entries = trace->num_entries;
+	merged_entry->merged_fh = merged_fh;
 
-	//tp->merge() here and save merged_fh in entry
 	tcf_e2e_cache->entry = merged_entry;
+	e2e_cache_trace_release(trace);
 
 	return;
 
@@ -371,7 +365,7 @@ e2e_cache_trace_tp_impl(struct sk_buff *skb,
 	if (!trace->ops) {
 		trace->ops = tp->ops;
 		/* trace only classifier supporting cache related ops */
-		if (!tp->ops->take || !tp->ops->put)
+		if (!tp->ops->merge || !tp->ops->take || !tp->ops->put)
 			goto not_cacheable;
 		trace->protocol = tp->protocol;
 	} else if (trace->ops != tp->ops) {

@@ -68,6 +68,15 @@ void e2e_cache_filter_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_pro
 	return ops->filter_delete(tcf_e2e_cache, tp, fh);
 }
 
+void e2e_cache_filter_update_stats(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto *tp,
+				   void *fh)
+{
+	if (!ops)
+		return;
+
+	return ops->filter_update_stats(tcf_e2e_cache, tp, fh);
+}
+
 void e2e_cache_tp_destroy(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto *tp)
 {
 	if (!ops)

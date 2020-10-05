@@ -1965,9 +1965,13 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 			goto cls_op_not_supp;
 		}
 	} else {
-		if (tp->ops->dump &&
-		    tp->ops->dump(net, tp, fh, skb, tcm, rtnl_held) < 0)
+		if (tp->ops->dump) {
+		   if (tp->chain->block->tcf_e2e_cache)
+			e2e_cache_filter_update_stats(tp->chain->block->tcf_e2e_cache, tp, fh);
+
+		   if (tp->ops->dump(net, tp, fh, skb, tcm, rtnl_held) < 0)
 			goto nla_put_failure;
+		}
 	}
 	nlh->nlmsg_len = skb_tail_pointer(skb) - b;
 	return skb->len;

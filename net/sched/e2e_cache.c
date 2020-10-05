@@ -517,6 +517,13 @@ e2e_cache_tp_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 	e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
 }
 
+static void
+e2e_cache_filter_update_stats_impl(struct tcf_e2e_cache *tcf_e2e_cache,
+				   const struct tcf_proto *tp,
+				   void *fh)
+{
+}
+
 static struct tcf_e2e_cache *
 e2e_cache_create_impl(struct tcf_chain *tcf_e2e_chain)
 {
@@ -554,6 +561,7 @@ static struct e2e_cache_ops e2e_cache_ops = {
 	.trace_ct	= e2e_cache_trace_ct_impl,
 	.tp_destroy	= e2e_cache_tp_destroy_impl,
 	.filter_delete	= e2e_cache_filter_delete_impl,
+	.filter_update_stats	= e2e_cache_filter_update_stats_impl,
 };
 
 static int

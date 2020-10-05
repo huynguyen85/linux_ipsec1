@@ -46,6 +46,8 @@ struct e2e_cache_ops {
 	void			(*trace_ct)(struct flow_offload *flow, int dir);
 	void			(*filter_delete)(struct tcf_e2e_cache *tcf_e2e_cache,
 						 const struct tcf_proto *tp, void *fh);
+	void			(*filter_update_stats)(struct tcf_e2e_cache *tcf_e2e_cache,
+					               const struct tcf_proto *tp, void *fh);
 	void			(*tp_destroy)(struct tcf_e2e_cache *tcf_e2e_cache,
 					      const struct tcf_proto *tp);
 };
@@ -64,6 +66,8 @@ void e2e_cache_trace_tp(struct sk_buff *skb, const struct tcf_proto *tp,
 void e2e_cache_trace_ct(struct flow_offload *flow, int dir);
 
 void e2e_cache_filter_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto *tp, void *fh);
+void e2e_cache_filter_update_stats(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto *tp,
+				   void *fh);
 void e2e_cache_tp_destroy(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto *tp);
 
 #endif /* __NET_E2E_CACHE_API_H */

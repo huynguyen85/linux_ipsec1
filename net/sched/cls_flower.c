@@ -480,7 +480,7 @@ static int fl_hw_replace_filter(struct tcf_proto *tp,
 }
 
 static void fl_hw_update_stats(struct tcf_proto *tp, struct cls_fl_filter *f,
-			       bool rtnl_held)
+			       bool rtnl_held, struct flow_stats *stats)
 {
 	struct tcf_block *block = tp->chain->block;
 	struct flow_cls_offload cls_flower = {};
@@ -494,8 +494,10 @@ static void fl_hw_update_stats(struct tcf_proto *tp, struct cls_fl_filter *f,
 			 rtnl_held);
 
 	tcf_exts_stats_update(&f->exts, cls_flower.stats.bytes,
-			      cls_flower.stats.pkts,
-			      cls_flower.stats.lastused);
+			      cls_flower.stats.pkts, cls_flower.stats.lastused);
+
+	if (stats)
+		memcpy(stats, &cls_flower.stats, sizeof(*stats));
 }
 
 static void __fl_put(struct cls_fl_filter *f)
@@ -2695,7 +2697,7 @@ static int fl_dump(struct net *net, struct tcf_proto *tp, void *fh,
 	spin_unlock(&tp->lock);
 
 	if (!skip_hw)
-		fl_hw_update_stats(tp, f, rtnl_held);
+		fl_hw_update_stats(tp, f, rtnl_held, NULL);
 
 	if (nla_put_u32(skb, TCA_FLOWER_IN_HW_COUNT, f->in_hw_count))
 		goto nla_put_failure;
@@ -2766,6 +2768,20 @@ static bool fl_delete_empty(struct tcf_proto *tp)
 	return tp->deleting;
 }
 
+static void fl_get_hw_stats(struct tcf_proto *tp, void *fh, struct flow_stats *stats)
+{
+	struct cls_fl_filter *f = fh;
+
+	fl_hw_update_stats(tp, f, true, stats);
+}
+
+static struct tcf_exts *fl_get_exts(const struct tcf_proto *tp, void *fh)
+{
+	struct cls_fl_filter *f = fh;
+
+	return &f->exts;
+}
+
 static struct tcf_proto_ops cls_fl_ops __read_mostly = {
 	.kind		= "flower",
 	.classify	= fl_classify,
@@ -2783,6 +2799,8 @@ static struct tcf_proto_ops cls_fl_ops __read_mostly = {
 	.hw_add		= fl_hw_add,
 	.hw_del		= fl_hw_del,
 	.dump		= fl_dump,
+	.get_hw_stats	= fl_get_hw_stats,
+	.get_exts	= fl_get_exts,
 	.bind_class	= fl_bind_class,
 	.tmplt_create	= fl_tmplt_create,
 	.tmplt_destroy	= fl_tmplt_destroy,

@@ -20,6 +20,9 @@ struct tcf_e2e_cache {
 	struct tcf_block *block;
 	struct rhltable tp_rhl;
 	struct rhltable tp_fh_rhl;
+	struct rhltable ct_rhl;
+	struct list_head fts;
+	struct list_head list;
 	struct rcu_head rcu;
 };
 

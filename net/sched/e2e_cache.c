@@ -81,15 +81,23 @@ struct e2e_cache_entry_node {
 	enum e2e_cache_trace_type type;
 	int pos;
 
-	struct { /* tp entry */
-		struct tcf_proto *tp;
-		void *fh;
+	union {
+		struct { /* tp entry */
+			struct tcf_proto *tp;
+			void *fh;
 
-		struct rhlist_head tp_node;
-		struct rhlist_head tp_fh_node;
+			struct rhlist_head tp_node;
+			struct rhlist_head tp_fh_node;
 
-		struct e2e_cache_entry_stats last_stats_sw;
-		struct e2e_cache_entry_stats last_stats_hw;
+			struct e2e_cache_entry_stats last_stats_sw;
+			struct e2e_cache_entry_stats last_stats_hw;
+		};
+
+		struct { /* ct entry */
+			unsigned long cookie;
+
+			struct rhlist_head ct_node;
+		};
 	};
 
 };
@@ -119,6 +127,8 @@ static DEFINE_PER_CPU(struct e2e_cache_trace *, packet_trace);
 static DECLARE_BITMAP(e2e_tracing_bm, E2E_TRACING_BM_SIZE) = {0};
 static struct kmem_cache *e2e_cache_mem;
 static struct workqueue_struct *e2e_wq;
+static LIST_HEAD(e2e_caches);
+static DECLARE_RWSEM(e2e_caches_lock);
 static const u32 prio = 1 << 16;
 
 static struct tcf_proto *
@@ -140,6 +150,14 @@ e2e_cache_lookup_tp(struct tcf_block *block, const struct tcf_proto_ops *ops,
 	return tp;
 }
 
+static int
+e2e_cache_entry_nf_ft_cb(enum tc_setup_type type, void *type_data, void *cb_priv);
+
+struct e2e_cache_ft {
+	struct list_head list;
+	struct nf_flowtable *nf_ft;
+};
+
 static const struct rhashtable_params tp_rhl_params = {
 	.key_len = FIELD_SIZEOF(struct e2e_cache_entry_node, tp),
 	.key_offset = offsetof(struct e2e_cache_entry_node, tp),
@@ -153,6 +171,14 @@ static const struct rhashtable_params tp_fh_rhl_params = {
 		   FIELD_SIZEOF(struct e2e_cache_entry_node, fh),
 	.key_offset = offsetof(struct e2e_cache_entry_node, tp),
 	.head_offset = offsetof(struct e2e_cache_entry_node, tp_fh_node),
+	.automatic_shrinking = true,
+	.min_size = 1,
+};
+
+static const struct rhashtable_params ct_rhl_params = {
+	.key_len = FIELD_SIZEOF(struct e2e_cache_entry_node, cookie),
+	.key_offset = offsetof(struct e2e_cache_entry_node, cookie),
+	.head_offset = offsetof(struct e2e_cache_entry_node, ct_node),
 	.automatic_shrinking = true,
 	.min_size = 1,
 };
@@ -190,7 +216,13 @@ e2e_cache_entry_insert(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_tra
 				goto err_tp_fh;
 			refcount_inc(&merged_entry->ref);
 		} else if (trace->entries[i].type == E2E_CACHE_TRACE_CT) {
-			//TODO: CT handling
+			node->cookie = trace->entries[i].cookie;
+
+			err = rhltable_insert(&tcf_e2e_cache->ct_rhl, &node->ct_node,
+					      ct_rhl_params);
+			if (err)
+				goto err_tp;
+			refcount_inc(&merged_entry->ref);
 		}
 
 		merged_entry->num_entries++;
@@ -217,6 +249,10 @@ err_tp:
 			rhltable_remove(&tcf_e2e_cache->tp_fh_rhl, &node->tp_fh_node,
 					tp_fh_rhl_params);
 			refcount_dec(&merged_entry->ref);
+		} else {
+			rhltable_remove(&tcf_e2e_cache->ct_rhl, &node->ct_node,
+					ct_rhl_params);
+			refcount_dec(&merged_entry->ref);
 		}
 	}
 
@@ -225,13 +261,15 @@ err_tp:
 
 static struct rhlist_head *
 e2e_cache_entries_lookup(struct tcf_e2e_cache *tcf_e2e_cache,
-			 const struct tcf_proto *tp, void *fh)
+			 const struct tcf_proto *tp, void *fh, unsigned long cookie)
 {
 	struct {
 		const struct tcf_proto *tp;
 		void *fh;
 	} tp_fh_key;
 
+	if (cookie)
+		return rhltable_lookup(&tcf_e2e_cache->ct_rhl, &cookie, ct_rhl_params);
 	if (!fh)
 		return rhltable_lookup(&tcf_e2e_cache->tp_rhl, &tp, tp_rhl_params);
 
@@ -266,6 +304,10 @@ e2e_cache_entry_remove(struct e2e_cache_entry *entry)
 
 			rhltable_remove(&tcf_e2e_cache->tp_fh_rhl, &node->tp_fh_node,
 					tp_fh_rhl_params);
+			refcount_dec(&entry->ref);
+		} else {
+			rhltable_remove(&tcf_e2e_cache->ct_rhl, &node->ct_node,
+					ct_rhl_params);
 			refcount_dec(&entry->ref);
 		}
 	}
@@ -311,38 +353,41 @@ e2e_cache_entry_put_sync(struct e2e_cache_entry *entry)
 }
 
 typedef int (*e2e_cache_entries_walk_entry_fn)(const struct tcf_proto *tp, void *fh,
+					       unsigned long cookie, void *arg,
 					       struct e2e_cache_entry *merged_entry,
 					       struct e2e_cache_entry_node *node);
 
 static int
-e2e_cache_entry_unref(const struct tcf_proto *tp, void *fh,
-		      struct e2e_cache_entry *merged_entry,
+e2e_cache_entry_unref(const struct tcf_proto *tp, void *fh, unsigned long cookie,
+		      void *arg, struct e2e_cache_entry *merged_entry,
 		      struct e2e_cache_entry_node *node)
 {
 	e2e_cache_entry_remove(merged_entry);
 	return 0;
 }
 
-static void
+static int
 e2e_cache_entries_walk(struct tcf_e2e_cache *tcf_e2e_cache,
-		       const struct tcf_proto *tp, void *fh,
+		       const struct tcf_proto *tp, void *fh, unsigned long cookie, void *arg,
 		       e2e_cache_entries_walk_entry_fn walk_fn)
 {
 	struct e2e_cache_entry_node *node;
 	struct rhlist_head *list, *pos;
-	int err;
+	int cnt = 0, err;
 
 	if (!walk_fn)
-		return;
+		return -EINVAL;
 
 	rcu_read_lock();
 
-	list = e2e_cache_entries_lookup(tcf_e2e_cache, tp, fh);
+	list = e2e_cache_entries_lookup(tcf_e2e_cache, tp, fh, cookie);
 	rhl_for_each_rcu(pos, list) {
 		struct e2e_cache_entry *merged_entry;
 
 		// Get entry's node
-		if (!fh)
+		if (cookie)
+			rht_entry(node, pos, ct_node);
+		else if (!fh)
 			rht_entry(node, pos, tp_node);
 		else
 			rht_entry(node, pos, tp_fh_node);
@@ -359,14 +404,91 @@ e2e_cache_entries_walk(struct tcf_e2e_cache *tcf_e2e_cache,
 			continue;
 		}
 
-		err = walk_fn(tp, fh, merged_entry, node);
+		err = walk_fn(tp, fh, cookie, arg, merged_entry, node);
 		if (err)
 			pr_debug("walk fn failed err=%d\n", err);
+		else
+			++cnt;
 
 		e2e_cache_entry_put(merged_entry);
 	}
 
 	rcu_read_unlock();
+
+	return cnt;
+}
+
+static void
+e2e_cache_ft_free(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_ft *ft)
+{
+	nf_flow_table_offload_del_cb(ft->nf_ft, e2e_cache_entry_nf_ft_cb, tcf_e2e_cache);
+	list_del(&ft->list);
+	kfree(ft);
+}
+
+static void
+e2e_cache_ft_unregister(struct tcf_e2e_cache *tcf_e2e_cache, struct nf_flowtable *nf_ft)
+{
+	struct e2e_cache_ft *ft, *tmp;
+
+	list_for_each_entry_safe(ft, tmp, &tcf_e2e_cache->fts, list)
+		if (ft->nf_ft == nf_ft)
+			e2e_cache_ft_free(tcf_e2e_cache, ft);
+}
+
+static int
+e2e_cache_ft_register_single(struct tcf_e2e_cache *tcf_e2e_cache, struct nf_flowtable *nf_ft)
+{
+	struct e2e_cache_ft *ft;
+	int err;
+
+	down_read(&e2e_caches_lock);
+	list_for_each_entry(ft, &tcf_e2e_cache->fts, list) {
+		if (ft->nf_ft == nf_ft) {
+			up_read(&e2e_caches_lock);
+			return 0;
+		}
+	}
+	up_read(&e2e_caches_lock);
+
+	down_write(&e2e_caches_lock);
+	err = nf_flow_table_offload_add_cb(nf_ft, e2e_cache_entry_nf_ft_cb, tcf_e2e_cache);
+	if (err) {
+		up_write(&e2e_caches_lock);
+		if (err == -EEXIST)
+			return 0;
+		return err;
+	}
+
+	ft = kzalloc(sizeof(*ft), GFP_ATOMIC);
+	if (!ft) {
+		nf_flow_table_offload_del_cb(nf_ft, e2e_cache_entry_nf_ft_cb, tcf_e2e_cache);
+		up_write(&e2e_caches_lock);
+		return -ENOMEM;
+	}
+
+	ft->nf_ft = nf_ft;
+	list_add(&ft->list, &tcf_e2e_cache->fts);
+	up_write(&e2e_caches_lock);
+
+	return 0;
+}
+
+static int
+e2e_cache_ft_register(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_trace *trace)
+{
+	int err, i;
+
+	for (i = 0; i < trace->num_entries; i++) {
+		if (trace->entries[i].type != E2E_CACHE_TRACE_CT)
+			continue;
+
+		err = e2e_cache_ft_register_single(tcf_e2e_cache, trace->entries[i].nf_ft);
+		if (err)
+			return err;
+	}
+
+	return 0;
 }
 
 static bool
@@ -558,13 +680,20 @@ static void e2e_cache_trace_process_work(struct work_struct *work)
 	if (e2e_cache_entry_insert(tcf_e2e_cache, trace, merged_entry))
 		goto err_out_insert;
 
+	err = e2e_cache_ft_register(tcf_e2e_cache, trace);
+	if (err)
+		goto err_register;
+
+	e2e_cache_entry_put(merged_entry);
 	tcf_proto_put(tp, false, NULL);
 	e2e_cache_trace_release(trace);
 
 	return;
 
+err_register:
+	e2e_cache_entry_remove(merged_entry);
 err_out_insert:
-	e2e_cache_entry_delete(merged_entry);
+	e2e_cache_entry_put(merged_entry);
 err_out_alloc:
 err_out_merge:
 	tcf_proto_put(tp, false, NULL);
@@ -816,8 +945,9 @@ e2e_cache_entry_update(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_ent
 }
 
 static int
-e2e_cache_stats_update_walk(const struct tcf_proto *tp, void *fh,
-			    struct e2e_cache_entry *entry, struct e2e_cache_entry_node *node)
+e2e_cache_stats_update_walk(const struct tcf_proto *tp, void *fh, unsigned long cookie,
+			    void *arg, struct e2e_cache_entry *entry,
+			    struct e2e_cache_entry_node *node)
 {
 	struct tcf_exts *exts;
 
@@ -883,7 +1013,7 @@ e2e_cache_filter_delete_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 			     const struct tcf_proto *tp,
 			     void *fh)
 {
-	e2e_cache_entries_walk(tcf_e2e_cache, tp, fh, &e2e_cache_entry_unref);
+	e2e_cache_entries_walk(tcf_e2e_cache, tp, fh, 0, NULL, &e2e_cache_entry_unref);
 }
 
 static void
@@ -898,12 +1028,47 @@ e2e_cache_filter_update_stats_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 				   const struct tcf_proto *tp,
 				   void *fh)
 {
-	e2e_cache_entries_walk(tcf_e2e_cache, tp, fh, &e2e_cache_stats_update_walk);
+	e2e_cache_entries_walk(tcf_e2e_cache, tp, fh, 0, NULL, &e2e_cache_stats_update_walk);
+}
+
+static int
+e2e_cache_entry_nf_ft_cb(enum tc_setup_type type, void *type_data, void *cb_priv)
+{
+	struct tcf_e2e_cache *tcf_e2e_cache = cb_priv;
+	struct flow_cls_offload *f = type_data;
+	unsigned long cookie;
+	int err;
+
+	if (type != TC_SETUP_CLSFLOWER)
+		return -EOPNOTSUPP;
+
+	cookie = f->cookie;
+
+	switch (f->command) {
+	case FLOW_CLS_REPLACE:
+		break;
+	case FLOW_CLS_STATS:
+		break;
+	case FLOW_CLS_DESTROY:
+		err = e2e_cache_entries_walk(tcf_e2e_cache, NULL, NULL, cookie, NULL,
+					     &e2e_cache_entry_unref);
+		return err > 0? 0 : -ENOENT;
+	default:
+		break;
+	}
+
+	return -EOPNOTSUPP;
 }
 
 static void
 e2e_cache_trace_ft_delete_impl(struct nf_flowtable *nf_ft)
 {
+	struct tcf_e2e_cache *tcf_e2e_cache;
+
+	down_write(&e2e_caches_lock);
+	list_for_each_entry(tcf_e2e_cache, &e2e_caches, list)
+		e2e_cache_ft_unregister(tcf_e2e_cache, nf_ft);
+	up_write(&e2e_caches_lock);
 }
 
 static struct tcf_e2e_cache *
@@ -934,6 +1099,11 @@ e2e_cache_create_impl(struct Qdisc *q, enum flow_block_binder_type binder_type)
 	err = rhltable_init(&e2e_cache->tp_fh_rhl, &tp_fh_rhl_params);
 	if (err)
 		goto err_tp_fh_rhl;
+	err = rhltable_init(&e2e_cache->ct_rhl, &ct_rhl_params);
+	if (err)
+		goto err_ct_rhl;
+
+	INIT_LIST_HEAD(&e2e_cache->fts);
 
 	err = tcf_block_get_ext(&block, q, &ei, false, NULL);
 	if (err)
@@ -977,6 +1147,10 @@ err_eagain:
 	refcount_set(&e2e_cache->refcnt, 1);
 	pr_debug("chain=0x%p tp=0x%p\n", chain, tp);
 
+	down_write(&e2e_caches_lock);
+	list_add(&e2e_cache->list, &e2e_caches);
+	up_write(&e2e_caches_lock);
+
 	return e2e_cache;
 
 err_tp:
@@ -984,6 +1158,8 @@ err_tp:
 err_chain:
 	tcf_block_put_ext(block, q, &ei);
 err_block:
+	rhltable_destroy(&e2e_cache->tp_fh_rhl);
+err_ct_rhl:
 	rhltable_destroy(&e2e_cache->tp_fh_rhl);
 err_tp_fh_rhl:
 	rhltable_destroy(&e2e_cache->tp_rhl);
@@ -1011,7 +1187,7 @@ e2e_cache_detach_impl(struct tcf_e2e_cache *tcf_e2e_cache, struct Qdisc *q,
 }
 
 static void
-e2e_cache_tp_fh_rhl_free_fn(void *ptr, void *arg)
+e2e_cache_entry_rhl_free_fn(void *ptr, void *arg)
 {
 	struct e2e_cache_entry_node *node = ptr;
 	struct e2e_cache_entry *entry;
@@ -1023,8 +1199,18 @@ e2e_cache_tp_fh_rhl_free_fn(void *ptr, void *arg)
 static void
 e2e_cache_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache)
 {
-	rhltable_free_and_destroy(&tcf_e2e_cache->tp_rhl, e2e_cache_tp_fh_rhl_free_fn, NULL);
-	rhltable_free_and_destroy(&tcf_e2e_cache->tp_fh_rhl, e2e_cache_tp_fh_rhl_free_fn, NULL);
+	struct e2e_cache_ft *ft, *tmp;
+
+	down_write(&e2e_caches_lock);
+	list_del(&tcf_e2e_cache->list);
+
+	list_for_each_entry_safe(ft, tmp, &tcf_e2e_cache->fts, list)
+		e2e_cache_ft_free(tcf_e2e_cache, ft);
+	up_write(&e2e_caches_lock);
+
+	rhltable_free_and_destroy(&tcf_e2e_cache->tp_rhl, e2e_cache_entry_rhl_free_fn, NULL);
+	rhltable_free_and_destroy(&tcf_e2e_cache->tp_fh_rhl, e2e_cache_entry_rhl_free_fn, NULL);
+	rhltable_free_and_destroy(&tcf_e2e_cache->ct_rhl, e2e_cache_entry_rhl_free_fn, NULL);
 
 	tcf_block_put(tcf_e2e_cache->block);
 	module_put(THIS_MODULE);

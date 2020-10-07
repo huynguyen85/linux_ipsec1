@@ -1917,6 +1917,7 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 			 u32 portid, u32 seq, u16 flags, int event,
 			 bool terse_dump, bool rtnl_held)
 {
+	struct nla_bitfield32 dump_flags = {};
 	struct tcmsg *tcm;
 	struct nlmsghdr  *nlh;
 	unsigned char *b = skb_tail_pointer(skb);
@@ -1936,9 +1937,18 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 		tcm->tcm_block_index = block->index;
 	}
 	tcm->tcm_info = TC_H_MAKE(tp->prio, tp->protocol);
+
+	if (terse_dump) {
+		dump_flags.selector |= TCA_DUMP_FLAGS_TERSE;
+		dump_flags.value |= TCA_DUMP_FLAGS_TERSE;
+	}
+
 	if (nla_put_string(skb, TCA_KIND, tp->ops->kind))
 		goto nla_put_failure;
 	if (nla_put_u32(skb, TCA_CHAIN, tp->chain->index))
+		goto nla_put_failure;
+	if (dump_flags.selector &&
+	    nla_put_bitfield32(skb, TCA_DUMP_FLAGS, dump_flags.value, dump_flags.selector))
 		goto nla_put_failure;
 	if (!fh) {
 		tcm->tcm_handle = 0;

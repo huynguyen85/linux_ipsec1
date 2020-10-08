@@ -67,11 +67,23 @@ struct e2e_cache_trace {
 
 #define E2E_TRACING_BM_SIZE (1 << 23)
 
+struct e2e_cache_entry_stats {
+	u64 pkts;
+	u64 bytes;
+};
+
 struct e2e_cache_entry {
 	struct e2e_cache_trace_entry entries[E2E_CACHE_MAX_TRACE_ENTRIES];
 	int num_entries;
 
 	void *merged_fh;
+
+	u64 lastused;
+	unsigned long last_query;
+	struct e2e_cache_entry_stats entry_stats_hw;
+	struct e2e_cache_entry_stats entry_stats_sw;
+	struct e2e_cache_entry_stats filter_last_stats_sw[TCF_MAX_RECLASSIFY_LOOP];
+	struct e2e_cache_entry_stats filter_last_stats_hw[TCF_MAX_RECLASSIFY_LOOP];
 };
 
 struct tcf_e2e_cache {
@@ -470,6 +482,33 @@ e2e_cache_entry_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_ent
 }
 
 static void
+e2e_cache_entry_update(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_entry *entry)
+{
+	struct gnet_stats_basic_packed bstats = {0}, bstats_hw = {0};
+	struct flow_stats flow_stats;
+	struct tcf_exts *exts;
+
+	if (!time_after(jiffies, entry->last_query + jiffies_to_msecs(1000)))
+		return;
+
+	entry->last_query = jiffies;
+
+	// hw stats diff
+	tcf_e2e_cache->tp->ops->get_hw_stats(tcf_e2e_cache->tp, entry->merged_fh, &flow_stats);
+
+	// calc sw stats diff
+	exts = tcf_e2e_cache->tp->ops->get_exts(tcf_e2e_cache->tp, entry->merged_fh);
+	__gnet_stats_copy_basic(NULL, &bstats, exts->actions[0]->cpu_bstats, &exts->actions[0]->tcfa_bstats);
+	__gnet_stats_copy_basic(NULL, &bstats_hw, exts->actions[0]->cpu_bstats_hw, &exts->actions[0]->tcfa_bstats_hw);
+
+	entry->entry_stats_sw.pkts = bstats.packets - bstats_hw.packets;
+	entry->entry_stats_sw.bytes = bstats.bytes - bstats_hw.bytes;
+	entry->entry_stats_hw.pkts = bstats_hw.packets;
+	entry->entry_stats_hw.bytes = bstats_hw.bytes;
+	entry->lastused = max_t(u64, entry->lastused, exts->actions[0]->tcfa_tm.lastuse);
+}
+
+static void
 e2e_cache_trace_ct_impl(struct flow_offload *flow, int dir)
 {
 	struct e2e_cache_trace *trace = *this_cpu_ptr(&packet_trace);
@@ -499,8 +538,8 @@ e2e_cache_filter_delete_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 			     void *fh)
 {
 	/* TODO: Check all trace filters tp and fhs */
-	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[0].tp != tp ||
-	    tcf_e2e_cache->entry->entries[0].fh != fh)
+	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[1].tp != tp ||
+	    tcf_e2e_cache->entry->entries[1].fh != fh)
 		return;
 
 	e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
@@ -511,7 +550,7 @@ e2e_cache_tp_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 			  const struct tcf_proto *tp)
 {
 	/* TODO: Check all trace filters tps */
-	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[0].tp != tp)
+	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[1].tp != tp)
 		return;
 
 	e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
@@ -522,6 +561,34 @@ e2e_cache_filter_update_stats_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 				   const struct tcf_proto *tp,
 				   void *fh)
 {
+	struct e2e_cache_entry *entry;
+	struct tcf_exts *exts;
+
+	/* TODO: Check all trace filters tp and fhs */
+	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[1].tp != tp ||
+	    tcf_e2e_cache->entry->entries[1].fh != fh)
+		return;
+
+	// Refresh entry with sw/hw stats
+	entry = tcf_e2e_cache->entry;
+	e2e_cache_entry_update(tcf_e2e_cache, entry);
+
+	// Report diff
+	exts = tp->ops->get_exts(tp, fh);
+	tcf_exts_stats_update(exts,
+			      entry->entry_stats_hw.bytes - entry->filter_last_stats_hw[1].bytes,
+			      entry->entry_stats_hw.pkts - entry->filter_last_stats_hw[1].pkts,
+			      entry->lastused);
+	tcf_exts_stats_update_sw(exts,
+				 entry->entry_stats_sw.bytes - entry->filter_last_stats_sw[1].bytes,
+				 entry->entry_stats_sw.pkts - entry->filter_last_stats_sw[1].pkts,
+				 entry->lastused);
+
+	// Save for next diff
+	entry->filter_last_stats_hw[1].bytes = entry->entry_stats_hw.bytes;
+	entry->filter_last_stats_hw[1].pkts = entry->entry_stats_hw.pkts;
+	entry->filter_last_stats_sw[1].bytes = entry->entry_stats_sw.bytes;
+	entry->filter_last_stats_sw[1].pkts = entry->entry_stats_sw.pkts;
 }
 
 static struct tcf_e2e_cache *

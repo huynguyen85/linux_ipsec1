@@ -35,12 +35,12 @@ void e2e_cache_destroy(struct tcf_e2e_cache *tcf_e2e_cache)
 	return ops->destroy(tcf_e2e_cache);
 }
 
-void e2e_cache_trace_begin(struct sk_buff *skb)
+void e2e_cache_trace_begin(struct tcf_e2e_cache *tcf_e2e_cache, struct sk_buff *skb)
 {
 	if (!ops)
 		return;
 
-	return ops->trace_begin(skb);
+	return ops->trace_begin(tcf_e2e_cache, skb);
 }
 
 void e2e_cache_trace_end(struct sk_buff *skb, int classify_result)
@@ -58,6 +58,22 @@ void e2e_cache_trace_tp(struct sk_buff *skb, const struct tcf_proto *tp,
 		return;
 
 	return ops->trace_tp(skb, tp, classify_ret, res);
+}
+
+void e2e_cache_filter_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto *tp, void *fh)
+{
+	if (!ops)
+		return;
+
+	return ops->filter_delete(tcf_e2e_cache, tp, fh);
+}
+
+void e2e_cache_tp_destroy(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto *tp)
+{
+	if (!ops)
+		return;
+
+	return ops->tp_destroy(tcf_e2e_cache, tp);
 }
 
 void e2e_cache_trace_ct(struct flow_offload *flow, int dir)

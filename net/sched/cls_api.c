@@ -301,6 +301,9 @@ static void tcf_chain_put(struct tcf_chain *chain);
 static void tcf_proto_destroy(struct tcf_proto *tp, bool rtnl_held,
 			      bool sig_destroy, struct netlink_ext_ack *extack)
 {
+	if (tp->chain->block->tcf_e2e_cache)
+		e2e_cache_tp_destroy(tp->chain->block->tcf_e2e_cache, tp);
+
 	tp->ops->destroy(tp, rtnl_held, extack);
 	if (sig_destroy)
 		tcf_proto_signal_destroyed(tp->chain, tp);
@@ -1691,7 +1694,7 @@ int tcf_classify_ingress(struct sk_buff *skb,
 	}
 
 	if (tp && tp->chain->block->tcf_e2e_cache)
-		e2e_cache_trace_begin(skb);
+		e2e_cache_trace_begin(tp->chain->block->tcf_e2e_cache, skb);
 
 	ret = __tcf_classify(skb, tp, orig_tp, res, compat_mode,
 			     &last_executed_chain);
@@ -1968,6 +1971,8 @@ static int tfilter_del_notify(struct net *net, struct sk_buff *oskb,
 		return -EINVAL;
 	}
 
+	if (tp->chain->block->tcf_e2e_cache)
+		e2e_cache_filter_delete(tp->chain->block->tcf_e2e_cache, tp, fh);
 	err = tp->ops->delete(tp, fh, last, rtnl_held, extack);
 	if (err) {
 		kfree_skb(skb);

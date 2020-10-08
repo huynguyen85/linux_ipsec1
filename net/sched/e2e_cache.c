@@ -80,6 +80,8 @@ struct e2e_cache_trace {
 	int num_conns;
 	u32 hash;
 
+	struct tcf_e2e_cache *tcf_e2e_cache;
+
 	struct work_struct work;
 };
 
@@ -243,7 +245,7 @@ static void e2e_cache_trace_release_work(struct work_struct *work)
 	e2e_cache_trace_release(trace);
 }
 static void
-e2e_cache_trace_begin_impl(struct sk_buff *skb)
+e2e_cache_trace_begin_impl(struct tcf_e2e_cache *tcf_e2e_cache, struct sk_buff *skb)
 {
 	struct e2e_cache_trace **trace = this_cpu_ptr(&packet_trace);
 	struct e2e_cache_tuple tuple;
@@ -275,6 +277,7 @@ e2e_cache_trace_begin_impl(struct sk_buff *skb)
 
 	(*trace)->flags = E2E_CACHE_TRACE_CACHEABLE;
 	(*trace)->hash = hash;
+	(*trace)->tcf_e2e_cache = tcf_e2e_cache;
 }
 
 static void
@@ -421,6 +424,19 @@ e2e_cache_trace_ct_impl(struct flow_offload *flow, int dir)
 						             , flow, dir, trace->num_conns);
 }
 
+static void
+e2e_cache_filter_delete_impl(struct tcf_e2e_cache *tcf_e2e_cache,
+			     const struct tcf_proto *tp,
+			     void *fh)
+{
+}
+
+static void
+e2e_cache_tp_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache,
+			  const struct tcf_proto *tp)
+{
+}
+
 static struct tcf_e2e_cache *
 e2e_cache_create_impl(struct tcf_chain *tcf_e2e_chain)
 {
@@ -453,6 +469,8 @@ static struct e2e_cache_ops e2e_cache_ops = {
 	.trace_tp	= e2e_cache_trace_tp_impl,
 	.trace_end	= e2e_cache_trace_end_impl,
 	.trace_ct	= e2e_cache_trace_ct_impl,
+	.tp_destroy	= e2e_cache_tp_destroy_impl,
+	.filter_delete	= e2e_cache_filter_delete_impl,
 };
 
 static int

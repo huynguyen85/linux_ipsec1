@@ -73,6 +73,15 @@ struct mlx5e_ipsec_stats {
 	u64 ipsec_del_sa_success;
 	u64 ipsec_del_sa_fail;
 	u64 ipsec_cmd_drop;
+
+	u64 ipsec_full_rx_pkts;
+	u64 ipsec_full_rx_bytes;
+	u64 ipsec_full_rx_pkts_drop;
+	u64 ipsec_full_rx_bytes_drop;
+	u64 ipsec_full_tx_pkts;
+	u64 ipsec_full_tx_bytes;
+	u64 ipsec_full_tx_pkts_drop;
+	u64 ipsec_full_tx_bytes_drop;
 };
 
 struct mlx5e_accel_fs_esp;

@@ -23,7 +23,7 @@ int mlx5_esw_ipsec_get_refcnt(struct mlx5_eswitch *esw);
 void mlx5_esw_ipsec_put_refcnt(struct mlx5_eswitch *esw);
 bool mlx5_esw_ipsec_try_hold(struct mlx5_eswitch *esw);
 void mlx5_esw_ipsec_release(struct mlx5_eswitch *esw);
-
+void mlx5_esw_ipsec_full_offload_get_stats(struct mlx5_eswitch *esw, void *ipsec_stats);
 static inline int mlx5_is_ipsec_full_offload(struct mlx5e_priv *priv)
 {
 	struct mlx5_eswitch *esw = priv->mdev->priv.eswitch;
@@ -42,6 +42,8 @@ static inline int mlx5_esw_ipsec_create(struct mlx5_eswitch *esw) { return 0; }
 static inline void mlx5_esw_ipsec_destroy(struct mlx5_eswitch *esw) {}
 static inline bool mlx5_esw_ipsec_try_hold(struct mlx5_eswitch *esw) { return true; }
 static inline void mlx5_esw_ipsec_release(struct mlx5_eswitch *esw) { return; }
+static inline void
+mlx5_esw_ipsec_full_offload_get_stats(struct mlx5_eswitch *esw, void *ipsec_stats) {}
 #endif /* CONFIG_MLX5_EN_IPSEC */
 
 #endif /* __ML5_ESW_IPSEC_H__ */

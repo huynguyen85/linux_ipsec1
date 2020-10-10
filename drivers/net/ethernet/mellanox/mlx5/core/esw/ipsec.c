@@ -611,3 +611,37 @@ bool mlx5_esw_ipsec_is_full_initialized (struct mlx5_eswitch *esw)
 {
 	return esw && esw_ipsec_priv(esw);
 }
+
+void mlx5_esw_ipsec_full_offload_get_stats(struct mlx5_eswitch *esw, void *ipsec_stats)
+{
+	struct mlx5e_ipsec_stats *stats;
+
+	stats = (struct mlx5e_ipsec_stats *)ipsec_stats;
+
+	stats->ipsec_full_rx_pkts = 0;
+	stats->ipsec_full_rx_bytes = 0;
+	stats->ipsec_full_rx_pkts_drop = 0;
+	stats->ipsec_full_rx_bytes_drop = 0;
+	stats->ipsec_full_tx_pkts = 0;
+	stats->ipsec_full_tx_bytes = 0;
+	stats->ipsec_full_tx_pkts_drop = 0;
+	stats->ipsec_full_tx_bytes_drop = 0;
+
+	if (!esw_ipsec_decap_rule_counter(esw) ||
+	    !esw_ipsec_decap_miss_rule_counter(esw) ||
+	    !esw_ipsec_decap_miss_rule_counter(esw) ||
+	    !esw_ipsec_tx_chk_counter(esw))
+		return;
+
+	mlx5_fc_query(esw->dev, esw_ipsec_decap_rule_counter(esw),
+		      &stats->ipsec_full_rx_pkts, &stats->ipsec_full_rx_bytes);
+
+	mlx5_fc_query(esw->dev, esw_ipsec_decap_miss_rule_counter(esw),
+		      &stats->ipsec_full_rx_pkts_drop, &stats->ipsec_full_rx_bytes_drop);
+
+	mlx5_fc_query(esw->dev, esw_ipsec_tx_chk_counter(esw),
+		      &stats->ipsec_full_tx_pkts, &stats->ipsec_full_tx_bytes);
+
+	mlx5_fc_query(esw->dev, esw_ipsec_tx_chk_drop_counter(esw),
+		      &stats->ipsec_full_tx_pkts_drop, &stats->ipsec_full_tx_bytes_drop);
+}

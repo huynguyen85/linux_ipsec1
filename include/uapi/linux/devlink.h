@@ -180,6 +180,11 @@ enum devlink_eswitch_encap_mode {
 	DEVLINK_ESWITCH_ENCAP_MODE_BASIC,
 };
 
+enum devlink_eswitch_ipsec_mode {
+	DEVLINK_ESWITCH_IPSEC_MODE_NONE,
+	DEVLINK_ESWITCH_IPSEC_MODE_FULL,
+};
+
 enum devlink_port_flavour {
 	DEVLINK_PORT_FLAVOUR_PHYSICAL, /* Any kind of a port physically
 					* facing the user.
@@ -360,6 +365,7 @@ enum devlink_attr {
 	DEVLINK_ATTR_SB_OCC_MAX,		/* u32 */
 	DEVLINK_ATTR_ESWITCH_MODE,		/* u16 */
 	DEVLINK_ATTR_ESWITCH_INLINE_MODE,	/* u8 */
+	DEVLINK_ATTR_ESWITCH_IPSEC_MODE,        /* u8 */
 
 	DEVLINK_ATTR_DPIPE_TABLES,		/* nested */
 	DEVLINK_ATTR_DPIPE_TABLE,		/* nested */

@@ -531,7 +531,7 @@ void mlx5e_ipsec_offload_handle_rx_skb(struct net_device *netdev,
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 
-	if (is_ipsec_full_offload(priv))
+	if (mlx5_is_ipsec_full_offload(priv))
 		handle_rx_skb_full(priv, skb, cqe);
 	else
 		handle_rx_skb_inline(priv, skb, cqe);

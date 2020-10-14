@@ -522,7 +522,8 @@ int mlx5e_ipsec_init(struct mlx5e_priv *priv)
 		return -ENOMEM;
 	}
 
-	mlx5e_accel_ipsec_fs_init(priv);
+	if (!mlx5_is_ipsec_full_offload(priv))
+		mlx5e_accel_ipsec_fs_init(priv);
 	netdev_dbg(priv->netdev, "IPSec attached to netdevice\n");
 	return 0;
 }
@@ -534,7 +535,8 @@ void mlx5e_ipsec_cleanup(struct mlx5e_priv *priv)
 	if (!ipsec)
 		return;
 
-	mlx5e_accel_ipsec_fs_cleanup(priv);
+	if (!mlx5_is_ipsec_full_offload(priv))
+		mlx5e_accel_ipsec_fs_cleanup(priv);
 	destroy_workqueue(ipsec->wq);
 
 	ida_destroy(&ipsec->halloc);

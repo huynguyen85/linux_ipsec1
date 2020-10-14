@@ -1006,7 +1006,7 @@ static inline void mlx5e_handle_csum(struct net_device *netdev,
 			goto csum_unnecessary;
 
 		if (unlikely(mlx5_ipsec_is_rx_flow(cqe) &&
-			     !is_ipsec_full_offload(netdev_priv(netdev))))
+			     !mlx5_is_ipsec_full_offload(netdev_priv(netdev))))
 			goto csum_none;
 
 		stats->csum_complete++;

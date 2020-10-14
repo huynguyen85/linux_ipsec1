@@ -10,6 +10,7 @@
 #include <linux/in.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#include <linux/rhashtable.h>
 
 #include <net/e2e_cache_api.h>
 #include <net/pkt_cls.h>
@@ -24,6 +25,10 @@
 
 enum {
 	E2E_CACHE_TRACE_CACHEABLE  = BIT(0),
+};
+
+enum {
+	E2E_ENTRY_INSERTED  = BIT(0),
 };
 
 /* Number of reclassify + single CT per classify */
@@ -72,10 +77,33 @@ struct e2e_cache_entry_stats {
 	u64 bytes;
 };
 
+struct e2e_cache_entry_node {
+	enum e2e_cache_trace_type type;
+	int pos;
+
+	struct { /* tp entry */
+		struct tcf_proto *tp;
+		void *fh;
+
+		struct rhlist_head tp_node;
+		struct rhlist_head tp_fh_node;
+
+		struct e2e_cache_entry_stats last_stats_sw;
+		struct e2e_cache_entry_stats last_stats_hw;
+	};
+
+};
+
 struct e2e_cache_entry {
-	struct e2e_cache_trace_entry entries[E2E_CACHE_MAX_TRACE_ENTRIES];
-	const struct tcf_proto_ops *tp_ops;
+	struct e2e_cache_entry_node nodes[E2E_CACHE_MAX_TRACE_ENTRIES];
+	struct tcf_proto *tp;
 	int num_entries;
+
+	refcount_t ref;
+	struct rcu_head rcu;
+	struct work_struct work;
+
+	struct tcf_e2e_cache *tcf_e2e_cache;
 
 	void *merged_fh;
 
@@ -83,8 +111,8 @@ struct e2e_cache_entry {
 	unsigned long last_query;
 	struct e2e_cache_entry_stats entry_stats_hw;
 	struct e2e_cache_entry_stats entry_stats_sw;
-	struct e2e_cache_entry_stats filter_last_stats_sw[TCF_MAX_RECLASSIFY_LOOP];
-	struct e2e_cache_entry_stats filter_last_stats_hw[TCF_MAX_RECLASSIFY_LOOP];
+
+	unsigned long flags;
 };
 
 static DEFINE_PER_CPU(struct e2e_cache_trace *, packet_trace);
@@ -110,6 +138,235 @@ e2e_cache_lookup_tp(struct tcf_block *block, const struct tcf_proto_ops *ops,
 	else if (tp->ops != ops)
 		return ERR_PTR(-EINVAL);
 	return tp;
+}
+
+static const struct rhashtable_params tp_rhl_params = {
+	.key_len = FIELD_SIZEOF(struct e2e_cache_entry_node, tp),
+	.key_offset = offsetof(struct e2e_cache_entry_node, tp),
+	.head_offset = offsetof(struct e2e_cache_entry_node, tp_node),
+	.automatic_shrinking = true,
+	.min_size = 1,
+};
+
+static const struct rhashtable_params tp_fh_rhl_params = {
+	.key_len = FIELD_SIZEOF(struct e2e_cache_entry_node, tp) +
+		   FIELD_SIZEOF(struct e2e_cache_entry_node, fh),
+	.key_offset = offsetof(struct e2e_cache_entry_node, tp),
+	.head_offset = offsetof(struct e2e_cache_entry_node, tp_fh_node),
+	.automatic_shrinking = true,
+	.min_size = 1,
+};
+
+static void e2e_cache_entry_delete_work(struct work_struct *work);
+static void e2e_cache_entry_update_hw_stats_work(struct work_struct *work);
+
+static int
+e2e_cache_entry_insert(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_trace *trace,
+		       struct e2e_cache_entry *merged_entry)
+{
+	struct e2e_cache_entry_node *node;
+	int i, err;
+
+	for (i = 0; i < trace->num_entries; i++) {
+		struct e2e_cache_entry_node *node;
+
+		node = &merged_entry->nodes[i];
+
+		node->pos = i;
+		node->type = trace->entries[i].type;
+		if (trace->entries[i].type == E2E_CACHE_TRACE_TP) {
+			node->tp = trace->entries[i].tp;
+			node->fh = trace->entries[i].fh;
+
+			err = rhltable_insert(&tcf_e2e_cache->tp_rhl, &node->tp_node,
+					      tp_rhl_params);
+			if (err)
+				goto err_tp;
+			refcount_inc(&merged_entry->ref);
+
+			err = rhltable_insert(&tcf_e2e_cache->tp_fh_rhl, &node->tp_fh_node,
+					      tp_fh_rhl_params);
+			if (err)
+				goto err_tp_fh;
+			refcount_inc(&merged_entry->ref);
+		} else if (trace->entries[i].type == E2E_CACHE_TRACE_CT) {
+			//TODO: CT handling
+		}
+
+		merged_entry->num_entries++;
+	}
+
+	set_bit(E2E_ENTRY_INSERTED, &merged_entry->flags);
+
+	return 0;
+
+err_tp_fh:
+	pr_debug("err_tp_fh\n");
+	rhltable_remove(&tcf_e2e_cache->tp_rhl, &node->tp_node, tp_rhl_params);
+	refcount_dec(&merged_entry->ref);
+err_tp:
+	pr_debug("err_tp\n");
+	while (i-- > 0) {
+		// Cleanup previous [(i-1) - 0] nodes
+		node = &merged_entry->nodes[i];
+
+		if (node->type == E2E_CACHE_TRACE_TP) {
+			rhltable_remove(&tcf_e2e_cache->tp_rhl, &node->tp_node,
+					tp_rhl_params);
+			refcount_dec(&merged_entry->ref);
+			rhltable_remove(&tcf_e2e_cache->tp_fh_rhl, &node->tp_fh_node,
+					tp_fh_rhl_params);
+			refcount_dec(&merged_entry->ref);
+		}
+	}
+
+	return err;
+}
+
+static struct rhlist_head *
+e2e_cache_entries_lookup(struct tcf_e2e_cache *tcf_e2e_cache,
+			 const struct tcf_proto *tp, void *fh)
+{
+	struct {
+		const struct tcf_proto *tp;
+		void *fh;
+	} tp_fh_key;
+
+	if (!fh)
+		return rhltable_lookup(&tcf_e2e_cache->tp_rhl, &tp, tp_rhl_params);
+
+	tp_fh_key.tp = tp;
+	tp_fh_key.fh = fh;
+
+	return rhltable_lookup(&tcf_e2e_cache->tp_fh_rhl, &tp_fh_key, tp_fh_rhl_params);
+}
+
+static struct e2e_cache_entry *
+e2e_cache_entry_from_entry_node(struct e2e_cache_entry_node *node)
+{
+	return container_of(node, struct e2e_cache_entry, nodes[node->pos]);
+}
+
+static void
+e2e_cache_entry_remove(struct e2e_cache_entry *entry)
+{
+	struct tcf_e2e_cache *tcf_e2e_cache = entry->tcf_e2e_cache;
+	int i;
+
+	if (!test_and_clear_bit(E2E_ENTRY_INSERTED, &entry->flags))
+		return;
+
+	for (i = 0; i < entry->num_entries; i++) {
+		struct e2e_cache_entry_node *node = &entry->nodes[i];
+
+		if (node->type == E2E_CACHE_TRACE_TP) {
+			rhltable_remove(&tcf_e2e_cache->tp_rhl, &node->tp_node,
+					tp_rhl_params);
+			refcount_dec(&entry->ref);
+
+			rhltable_remove(&tcf_e2e_cache->tp_fh_rhl, &node->tp_fh_node,
+					tp_fh_rhl_params);
+			refcount_dec(&entry->ref);
+		}
+	}
+}
+
+static void
+e2e_cache_entry_delete(struct e2e_cache_entry *entry)
+{
+	bool last;
+
+	pr_debug("Deleting merged entry=0x%p\n", entry);
+
+	entry->tp->ops->delete(entry->tp, entry->merged_fh, &last, true, NULL);
+
+	tcf_proto_put(entry->tp, false, NULL);
+
+	kfree_rcu(entry, rcu);
+}
+
+static bool
+e2e_cache_entry_get(struct e2e_cache_entry *entry)
+{
+	return refcount_inc_not_zero(&entry->ref);
+}
+
+static void
+e2e_cache_entry_put(struct e2e_cache_entry *entry)
+{
+	if (!refcount_dec_and_test(&entry->ref))
+		return;
+
+	INIT_WORK(&entry->work, &e2e_cache_entry_delete_work);
+	queue_work(e2e_wq, &entry->work);
+}
+
+static void
+e2e_cache_entry_put_sync(struct e2e_cache_entry *entry)
+{
+	if (!refcount_dec_and_test(&entry->ref))
+		return;
+
+	e2e_cache_entry_delete(entry);
+}
+
+typedef int (*e2e_cache_entries_walk_entry_fn)(const struct tcf_proto *tp, void *fh,
+					       struct e2e_cache_entry *merged_entry,
+					       struct e2e_cache_entry_node *node);
+
+static int
+e2e_cache_entry_unref(const struct tcf_proto *tp, void *fh,
+		      struct e2e_cache_entry *merged_entry,
+		      struct e2e_cache_entry_node *node)
+{
+	e2e_cache_entry_remove(merged_entry);
+	return 0;
+}
+
+static void
+e2e_cache_entries_walk(struct tcf_e2e_cache *tcf_e2e_cache,
+		       const struct tcf_proto *tp, void *fh,
+		       e2e_cache_entries_walk_entry_fn walk_fn)
+{
+	struct e2e_cache_entry_node *node;
+	struct rhlist_head *list, *pos;
+	int err;
+
+	if (!walk_fn)
+		return;
+
+	rcu_read_lock();
+
+	list = e2e_cache_entries_lookup(tcf_e2e_cache, tp, fh);
+	rhl_for_each_rcu(pos, list) {
+		struct e2e_cache_entry *merged_entry;
+
+		// Get entry's node
+		if (!fh)
+			rht_entry(node, pos, tp_node);
+		else
+			rht_entry(node, pos, tp_fh_node);
+
+		if (rht_is_a_nulls(&pos->rhead)) {
+			pr_debug("err\n");
+			break;
+		}
+
+		// Get actual entry
+		merged_entry = e2e_cache_entry_from_entry_node(node);
+		if (!e2e_cache_entry_get(merged_entry)) {
+			pr_debug("merged_entry get err\n");
+			continue;
+		}
+
+		err = walk_fn(tp, fh, merged_entry, node);
+		if (err)
+			pr_debug("walk fn failed err=%d\n", err);
+
+		e2e_cache_entry_put(merged_entry);
+	}
+
+	rcu_read_unlock();
 }
 
 static bool
@@ -283,16 +540,22 @@ static void e2e_cache_trace_process_work(struct work_struct *work)
 	if (!merged_entry)
 		goto err_out_alloc;
 
-	memcpy(&merged_entry->entries, &trace->entries, sizeof(trace->entries));
-	merged_entry->num_entries = trace->num_entries;
-	merged_entry->merged_fh = merged_fh;
-	merged_entry->tp_ops = tp->ops;
+	tcf_proto_get_not_zero(tp);
+	merged_entry->tp = tp;
 
-	tcf_e2e_cache->entry = merged_entry;
+	refcount_set(&merged_entry->ref, 1);
+	merged_entry->tcf_e2e_cache = tcf_e2e_cache;
+	merged_entry->merged_fh = merged_fh;
+	if (e2e_cache_entry_insert(tcf_e2e_cache, trace, merged_entry))
+		goto err_out_insert;
+
+	tcf_proto_put(tp, false, NULL);
 	e2e_cache_trace_release(trace);
 
 	return;
 
+err_out_insert:
+	e2e_cache_entry_delete(merged_entry);
 err_out_alloc:
 err_out_merge:
 	tcf_proto_put(tp, false, NULL);
@@ -472,50 +735,67 @@ trace_failed:
 	}
 }
 
-static void
-e2e_cache_entry_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_entry *entry)
+static void e2e_cache_entry_delete_work(struct work_struct *work)
 {
-	struct tcf_proto *tp;
-	bool last;
+	struct e2e_cache_entry *entry = container_of(work,
+						     struct e2e_cache_entry,
+						     work);
 
-	tp = e2e_cache_lookup_tp(tcf_e2e_cache->block, entry->tp_ops, prio);
-	if (IS_ERR_OR_NULL(tp)) {
-		pr_err("tp not found\n");
-		return;
-	}
+	e2e_cache_entry_delete(entry);
+}
 
-	tp->ops->delete(tp, entry->merged_fh, &last, true, NULL);
-	tcf_proto_put(tp, false, NULL);
+struct e2e_cache_entry_update_work {
+	struct work_struct work;
+	struct e2e_cache_entry *entry;
+};
 
-	/* for now we only have one entry so no need to check last */
-	kfree(tcf_e2e_cache->entry);
-	tcf_e2e_cache->entry = NULL;
+static void e2e_cache_entry_update_hw_stats_work(struct work_struct *work)
+{
+	struct e2e_cache_entry_update_work *update_work;
+	struct e2e_cache_entry *entry;
+	struct flow_stats flow_stats;
+
+	update_work = container_of(work, struct e2e_cache_entry_update_work, work);
+	entry = update_work->entry;
+
+	entry->tp->ops->get_hw_stats(entry->tp, entry->merged_fh, &flow_stats);
+
+	e2e_cache_entry_put(entry);
+	e2e_cache_put(entry->tcf_e2e_cache);
+
+	kfree(work);
 }
 
 static void
 e2e_cache_entry_update(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_entry *entry)
 {
 	struct gnet_stats_basic_packed bstats = {0}, bstats_hw = {0};
-	struct flow_stats flow_stats;
+	struct e2e_cache_entry_update_work *update_work;
 	struct tcf_exts *exts;
-	struct tcf_proto *tp;
 
 	if (!time_after(jiffies, entry->last_query + jiffies_to_msecs(1000)))
 		return;
 
-	tp = e2e_cache_lookup_tp(tcf_e2e_cache->block, entry->tp_ops, prio);
-	if (IS_ERR_OR_NULL(tp)) {
-		pr_err("tp not found\n");
+	update_work = kzalloc(sizeof(*update_work), GFP_ATOMIC);
+	if (!update_work)
+		return;
+
+	if (!e2e_cache_get(entry->tcf_e2e_cache)) {
+		kfree(update_work);
 		return;
 	}
 
 	entry->last_query = jiffies;
 
-	// hw stats diff
-	tp->ops->get_hw_stats(tp, entry->merged_fh, &flow_stats);
+	// update the hw stats - cannot be called in RCU context
+	// will be available for the next round
+	e2e_cache_entry_get(entry);
+	update_work->entry = entry;
+	INIT_WORK(&update_work->work, &e2e_cache_entry_update_hw_stats_work);
+	queue_work(e2e_wq, &update_work->work);
 
 	// calc sw stats diff
-	exts = tp->ops->get_exts(tp, entry->merged_fh);
+	exts = entry->tp->ops->get_exts(entry->tp, entry->merged_fh);
 	__gnet_stats_copy_basic(NULL, &bstats, exts->actions[0]->cpu_bstats, &exts->actions[0]->tcfa_bstats);
 	__gnet_stats_copy_basic(NULL, &bstats_hw, exts->actions[0]->cpu_bstats_hw, &exts->actions[0]->tcfa_bstats_hw);
 
@@ -524,7 +804,34 @@ e2e_cache_entry_update(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_ent
 	entry->entry_stats_hw.pkts = bstats_hw.packets;
 	entry->entry_stats_hw.bytes = bstats_hw.bytes;
 	entry->lastused = max_t(u64, entry->lastused, exts->actions[0]->tcfa_tm.lastuse);
-	tcf_proto_put(tp, false, NULL);
+}
+
+static int
+e2e_cache_stats_update_walk(const struct tcf_proto *tp, void *fh,
+			    struct e2e_cache_entry *entry, struct e2e_cache_entry_node *node)
+{
+	struct tcf_exts *exts;
+
+	e2e_cache_entry_update(entry->tcf_e2e_cache, entry);
+
+	// Report diff
+	exts = tp->ops->get_exts(tp, fh);
+	tcf_exts_stats_update(exts,
+			      entry->entry_stats_hw.bytes - node->last_stats_hw.bytes,
+			      entry->entry_stats_hw.pkts - node->last_stats_hw.pkts,
+			      entry->lastused);
+	tcf_exts_stats_update_sw(exts,
+				 entry->entry_stats_sw.bytes - node->last_stats_sw.bytes,
+				 entry->entry_stats_sw.pkts - node->last_stats_sw.pkts,
+				 entry->lastused);
+
+	// Save for next diff
+	node->last_stats_hw.bytes = entry->entry_stats_hw.bytes;
+	node->last_stats_hw.pkts = entry->entry_stats_hw.pkts;
+	node->last_stats_sw.bytes = entry->entry_stats_sw.bytes;
+	node->last_stats_sw.pkts = entry->entry_stats_sw.pkts;
+
+	return 0;
 }
 
 static void
@@ -556,23 +863,14 @@ e2e_cache_filter_delete_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 			     const struct tcf_proto *tp,
 			     void *fh)
 {
-	/* TODO: Check all trace filters tp and fhs */
-	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[1].tp != tp ||
-	    tcf_e2e_cache->entry->entries[1].fh != fh)
-		return;
-
-	e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
+	e2e_cache_entries_walk(tcf_e2e_cache, tp, fh, &e2e_cache_entry_unref);
 }
 
 static void
 e2e_cache_tp_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 			  const struct tcf_proto *tp)
 {
-	/* TODO: Check all trace filters tps */
-	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[1].tp != tp)
-		return;
-
-	e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
+	e2e_cache_filter_delete_impl(tcf_e2e_cache, tp, NULL);
 }
 
 static void
@@ -580,34 +878,7 @@ e2e_cache_filter_update_stats_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 				   const struct tcf_proto *tp,
 				   void *fh)
 {
-	struct e2e_cache_entry *entry;
-	struct tcf_exts *exts;
-
-	/* TODO: Check all trace filters tp and fhs */
-	if (!tcf_e2e_cache->entry || tcf_e2e_cache->entry->entries[1].tp != tp ||
-	    tcf_e2e_cache->entry->entries[1].fh != fh)
-		return;
-
-	// Refresh entry with sw/hw stats
-	entry = tcf_e2e_cache->entry;
-	e2e_cache_entry_update(tcf_e2e_cache, entry);
-
-	// Report diff
-	exts = tp->ops->get_exts(tp, fh);
-	tcf_exts_stats_update(exts,
-			      entry->entry_stats_hw.bytes - entry->filter_last_stats_hw[1].bytes,
-			      entry->entry_stats_hw.pkts - entry->filter_last_stats_hw[1].pkts,
-			      entry->lastused);
-	tcf_exts_stats_update_sw(exts,
-				 entry->entry_stats_sw.bytes - entry->filter_last_stats_sw[1].bytes,
-				 entry->entry_stats_sw.pkts - entry->filter_last_stats_sw[1].pkts,
-				 entry->lastused);
-
-	// Save for next diff
-	entry->filter_last_stats_hw[1].bytes = entry->entry_stats_hw.bytes;
-	entry->filter_last_stats_hw[1].pkts = entry->entry_stats_hw.pkts;
-	entry->filter_last_stats_sw[1].bytes = entry->entry_stats_sw.bytes;
-	entry->filter_last_stats_sw[1].pkts = entry->entry_stats_sw.pkts;
+	e2e_cache_entries_walk(tcf_e2e_cache, tp, fh, &e2e_cache_stats_update_walk);
 }
 
 static struct tcf_e2e_cache *
@@ -631,6 +902,13 @@ e2e_cache_create_impl(struct Qdisc *q, enum flow_block_binder_type binder_type)
 	e2e_cache = kzalloc(sizeof(*e2e_cache), GFP_KERNEL);
 	if (!e2e_cache)
 		return ERR_PTR(-ENOMEM);
+
+	err = rhltable_init(&e2e_cache->tp_rhl, &tp_rhl_params);
+	if (err)
+		goto err_tp_rhl;
+	err = rhltable_init(&e2e_cache->tp_fh_rhl, &tp_fh_rhl_params);
+	if (err)
+		goto err_tp_fh_rhl;
 
 	err = tcf_block_get_ext(&block, q, &ei, false, NULL);
 	if (err)
@@ -681,6 +959,10 @@ err_tp:
 err_chain:
 	tcf_block_put_ext(block, q, &ei);
 err_block:
+	rhltable_destroy(&e2e_cache->tp_fh_rhl);
+err_tp_fh_rhl:
+	rhltable_destroy(&e2e_cache->tp_rhl);
+err_tp_rhl:
 	kfree(e2e_cache);
 	return ERR_PTR(err);
 }
@@ -704,10 +986,20 @@ e2e_cache_detach_impl(struct tcf_e2e_cache *tcf_e2e_cache, struct Qdisc *q,
 }
 
 static void
+e2e_cache_tp_fh_rhl_free_fn(void *ptr, void *arg)
+{
+	struct e2e_cache_entry_node *node = ptr;
+	struct e2e_cache_entry *entry;
+
+	entry = e2e_cache_entry_from_entry_node(node);
+	e2e_cache_entry_put_sync(entry);
+}
+
+static void
 e2e_cache_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache)
 {
-	if (tcf_e2e_cache->entry)
-		e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
+	rhltable_free_and_destroy(&tcf_e2e_cache->tp_rhl, e2e_cache_tp_fh_rhl_free_fn, NULL);
+	rhltable_free_and_destroy(&tcf_e2e_cache->tp_fh_rhl, e2e_cache_tp_fh_rhl_free_fn, NULL);
 
 	tcf_block_put(tcf_e2e_cache->block);
 	module_put(THIS_MODULE);

@@ -18,7 +18,8 @@ enum e2e_cache_trace_type {
 struct tcf_e2e_cache {
 	refcount_t refcnt;
 	struct tcf_block *block;
-	struct e2e_cache_entry *entry;
+	struct rhltable tp_rhl;
+	struct rhltable tp_fh_rhl;
 	struct rcu_head rcu;
 };
 

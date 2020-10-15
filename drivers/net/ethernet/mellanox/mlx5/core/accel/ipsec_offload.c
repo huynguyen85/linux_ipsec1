@@ -133,6 +133,7 @@ struct mlx5_ipsec_obj_attrs {
 	u32 accel_flags;
 	u32 esn_msb;
 	u32 enc_key_id;
+	bool is_tx;
 };
 
 static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
@@ -142,7 +143,7 @@ static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
 	const struct aes_gcm_keymat *aes_gcm = attrs->aes_gcm;
 	u32 out[MLX5_ST_SZ_DW(general_obj_out_cmd_hdr)];
 	u32 in[MLX5_ST_SZ_DW(create_ipsec_obj_in)] = {};
-	void *obj, *salt_p, *salt_iv_p;
+	void *obj, *salt_p, *salt_iv_p, *aso_ctx;
 	int err;
 
 	obj = MLX5_ADDR_OF(create_ipsec_obj_in, in, ipsec_object);
@@ -184,6 +185,16 @@ static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
 		 MLX5_CMD_OP_CREATE_GENERAL_OBJECT);
 	MLX5_SET(general_obj_in_cmd_hdr, in, obj_type,
 		 MLX5_GENERAL_OBJECT_TYPES_IPSEC);
+
+	/* ASO context */
+	if (attrs->accel_flags & MLX5_ACCEL_ESP_FLAGS_FULL_OFFLOAD) {
+		MLX5_SET(ipsec_obj, obj, full_offload, 1);
+		aso_ctx = MLX5_ADDR_OF(ipsec_obj, obj, ipsec_aso);
+		MLX5_SET(ipsec_aso, aso_ctx, valid, 1);
+		MLX5_SET(ipsec_obj, obj, aso_return_reg, MLX5_IPSEC_ASO_REG_C_4_5);
+		if (attrs->is_tx)
+			MLX5_SET(ipsec_aso, aso_ctx, mode, MLX5_IPSEC_ASO_INC_SN);
+	}
 
 	err = mlx5_cmd_exec(mdev, in, sizeof(in), out, sizeof(out));
 	if (!err)
@@ -243,6 +254,7 @@ static void *mlx5_ipsec_offload_create_sa_ctx(struct mlx5_core_dev *mdev,
 	ipsec_attrs.accel_flags = accel_xfrm->attrs.flags;
 	ipsec_attrs.esn_msb = accel_xfrm->attrs.esn;
 	ipsec_attrs.enc_key_id = sa_ctx->enc_key_id;
+	ipsec_attrs.is_tx = accel_xfrm->attrs.action & MLX5_ACCEL_ESP_ACTION_ENCRYPT;
 	err = mlx5_create_ipsec_obj(mdev, &ipsec_attrs,
 				    &sa_ctx->ipsec_obj_id);
 	if (err) {

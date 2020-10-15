@@ -41,6 +41,7 @@
 #include "en_accel/ipsec.h"
 #include "en_accel/ipsec_rxtx.h"
 #include "en_accel/ipsec_fs.h"
+#include "eswitch.h"
 
 static struct mlx5e_ipsec_sa_entry *to_ipsec_sa_entry(struct xfrm_state *x)
 {
@@ -198,6 +199,11 @@ mlx5e_ipsec_build_accel_xfrm_attrs(struct mlx5e_ipsec_sa_entry *sa_entry,
 			MLX5_ACCEL_ESP_FLAGS_TRANSPORT :
 			MLX5_ACCEL_ESP_FLAGS_TUNNEL;
 
+/* Valid till stack changes accepted */
+#define XFRM_OFFLOAD_FULL 4
+	if (x->xso.flags & XFRM_OFFLOAD_FULL)
+		attrs->flags |= MLX5_ACCEL_ESP_FLAGS_FULL_OFFLOAD;
+
 	/* spi */
 	attrs->spi = x->id.spi;
 
@@ -213,9 +219,12 @@ mlx5e_ipsec_build_accel_xfrm_attrs(struct mlx5e_ipsec_sa_entry *sa_entry,
 static inline int mlx5e_xfrm_validate_state(struct xfrm_state *x)
 {
 	struct net_device *netdev = x->xso.real_dev;
+	struct mlx5_core_dev *mdev;
+	struct mlx5_eswitch *esw;
 	struct mlx5e_priv *priv;
 
 	priv = netdev_priv(netdev);
+	mdev = priv->mdev;
 
 	if (x->props.aalgo != SADB_AALG_NONE) {
 		netdev_info(netdev, "Cannot offload authenticated xfrm states\n");
@@ -230,7 +239,7 @@ static inline int mlx5e_xfrm_validate_state(struct xfrm_state *x)
 		return -EINVAL;
 	}
 	if (x->props.flags & XFRM_STATE_ESN &&
-	    !(mlx5_accel_ipsec_device_caps(priv->mdev) &
+	    !(mlx5_accel_ipsec_device_caps(mdev) &
 	    MLX5_ACCEL_IPSEC_CAP_ESN)) {
 		netdev_info(netdev, "Cannot offload ESN xfrm states\n");
 		return -EINVAL;
@@ -279,10 +288,33 @@ static inline int mlx5e_xfrm_validate_state(struct xfrm_state *x)
 		return -EINVAL;
 	}
 	if (x->props.family == AF_INET6 &&
-	    !(mlx5_accel_ipsec_device_caps(priv->mdev) &
+	    !(mlx5_accel_ipsec_device_caps(mdev) &
 	     MLX5_ACCEL_IPSEC_CAP_IPV6)) {
 		netdev_info(netdev, "IPv6 xfrm state offload is not supported by this device\n");
 		return -EINVAL;
+	}
+	if (x->xso.flags & XFRM_OFFLOAD_FULL) {
+		if (!(mlx5_accel_ipsec_device_caps(mdev) & MLX5_ACCEL_IPSEC_CAP_FULL_OFFLOAD)) {
+			netdev_info(netdev, "IPsec full offload is not supported by this device.\n");
+			return -EINVAL;
+		}
+		esw = mdev->priv.eswitch;
+		if (!esw || esw->mode != MLX5_ESWITCH_OFFLOADS) {
+			netdev_info(netdev, "IPsec full offload allowed only in switchdev mode.\n");
+			return -EINVAL;
+		}
+		if (esw->offloads.ipsec != DEVLINK_ESWITCH_IPSEC_MODE_FULL) {
+			netdev_info(netdev,
+				    "IPsec full offload allowed only in when devlink full ipsec mode is set.\n");
+			return -EINVAL;
+		}
+	} else {
+		esw = mdev->priv.eswitch;
+		if (esw && esw->offloads.ipsec == DEVLINK_ESWITCH_IPSEC_MODE_FULL) {
+			netdev_info(netdev,
+				    "IPsec crypto only offload is not allowed when devlink ipsec mode is full.\n");
+			return -EINVAL;
+		}
 	}
 	return 0;
 }

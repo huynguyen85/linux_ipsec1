@@ -296,6 +296,17 @@ out:
 	return err;
 }
 
+struct mlx5_flow_table *mlx5_esw_ipsec_get_table(struct mlx5_eswitch *esw, enum mlx5_esw_ipsec_table_type type)
+{
+	switch (type) {
+	case MLX5_ESW_IPSEC_FT_RX_CRYPTO:
+		return esw_ipsec_ft_crypto_rx(esw);
+	case MLX5_ESW_IPSEC_FT_RX_DECAP:
+		return esw_ipsec_ft_decap_rx(esw);
+	default: return NULL;
+	}
+}
+
 int mlx5_esw_ipsec_create(struct mlx5_eswitch *esw)
 {
 	struct mlx5_esw_ipsec_priv *ipsec_priv;
@@ -339,4 +350,9 @@ void mlx5_esw_ipsec_destroy(struct mlx5_eswitch *esw)
 	esw_offloads_ipsec_tables_rx_destroy(esw);
 	kfree(esw_ipsec_priv(esw));
 	esw_ipsec_priv(esw) = NULL;
+}
+
+bool mlx5_esw_ipsec_is_full_initialized (struct mlx5_eswitch *esw)
+{
+	return esw && esw_ipsec_priv(esw);
 }

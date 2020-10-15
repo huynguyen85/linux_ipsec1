@@ -45,6 +45,9 @@ static u32 mlx5_ipsec_offload_device_caps(struct mlx5_core_dev *mdev)
 		caps |= MLX5_ACCEL_IPSEC_CAP_TX_IV_IS_ESN;
 	}
 
+	if (MLX5_CAP_IPSEC(mdev, ipsec_full_offload))
+		caps |= MLX5_ACCEL_IPSEC_CAP_FULL_OFFLOAD;
+
 	/* We can accommodate up to 2^24 different IPsec objects
 	 * because we use up to 24 bit in flow table metadata
 	 * to hold the IPsec Object unique handle.

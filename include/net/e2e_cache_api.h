@@ -3,6 +3,7 @@
 #ifndef __NET_E2E_CACHE_API_H
 #define __NET_E2E_CACHE_API_H
 
+#include <net/netfilter/nf_flow_table.h>
 #include <net/sch_generic.h>
 
 struct tcf_e2e_cache;
@@ -14,6 +15,7 @@ struct e2e_cache_ops {
 	void			(*trace_end)(struct sk_buff *skb, int classify_result);
 	void			(*trace_tp)(struct sk_buff *skb, const struct tcf_proto *tp,
 					    int classify_ret, struct tcf_result *res);
+	void			(*trace_ct)(struct flow_offload *flow, int dir);
 };
 
 void e2e_cache_register_ops(struct e2e_cache_ops *e2e_cache_ops);
@@ -27,5 +29,6 @@ void e2e_cache_trace_end(struct sk_buff *skb, int classify_result);
 
 void e2e_cache_trace_tp(struct sk_buff *skb, const struct tcf_proto *tp,
 			int classify_ret, struct tcf_result *res);
+void e2e_cache_trace_ct(struct flow_offload *flow, int dir);
 
 #endif /* __NET_E2E_CACHE_API_H */

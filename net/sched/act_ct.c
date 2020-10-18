@@ -33,6 +33,8 @@
 #include <net/netfilter/ipv6/nf_defrag_ipv6.h>
 #include <uapi/linux/netfilter/nf_nat.h>
 
+#include <net/e2e_cache_api.h>
+
 static uint offload_timeout = 30;
 module_param(offload_timeout, uint, 0644);
 MODULE_PARM_DESC(offload_timeout, "Flow offload timeout in seconds");
@@ -344,9 +346,11 @@ static void tcf_ct_flow_table_put(struct tcf_ct_params *params)
 
 static void tcf_ct_flow_table_add(struct tcf_ct_flow_table *ct_ft,
 				  struct nf_conn *ct,
+				  enum ip_conntrack_info ctinfo,
 				  bool tcp)
 {
 	struct flow_offload *entry;
+	int dir;
 	int err;
 
 	if (test_and_set_bit(IPS_OFFLOAD_BIT, &ct->status))
@@ -367,6 +371,8 @@ static void tcf_ct_flow_table_add(struct tcf_ct_flow_table *ct_ft,
 	if (err)
 		goto err_add;
 
+	dir = (ctinfo == IP_CT_IS_REPLY ? FLOW_OFFLOAD_DIR_REPLY : FLOW_OFFLOAD_DIR_ORIGINAL);
+	e2e_cache_trace_ct(entry, dir);
 	return;
 
 err_add:
@@ -400,7 +406,7 @@ static void tcf_ct_flow_table_process_conn(struct tcf_ct_flow_table *ct_ft,
 	    ct->status & IPS_SEQ_ADJUST)
 		return;
 
-	tcf_ct_flow_table_add(ct_ft, ct, tcp);
+	tcf_ct_flow_table_add(ct_ft, ct, ctinfo, tcp);
 }
 
 static bool
@@ -541,6 +547,8 @@ static bool tcf_ct_flow_table_lookup(struct tcf_ct_params *p,
 	flow_offload_refresh(nf_ft, flow);
 	nf_conntrack_get(&ct->ct_general);
 	nf_ct_set(skb, ct, ctinfo);
+
+	e2e_cache_trace_ct(flow, dir);
 
 	return true;
 }

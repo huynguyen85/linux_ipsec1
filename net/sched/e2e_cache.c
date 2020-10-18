@@ -8,6 +8,9 @@
 #include <net/e2e_cache_api.h>
 #include <net/pkt_cls.h>
 
+#include <linux/skbuff.h>
+#include <net/netfilter/nf_conntrack.h>
+
 struct tcf_e2e_cache {
 	struct tcf_chain *tcf_e2e_chain;
 };
@@ -20,16 +23,24 @@ enum {
 #define E2E_CACHE_MAX_TRACE_ENTRIES (TCF_MAX_RECLASSIFY_LOOP * 2)
 
 enum e2e_cache_trace_type {
-        E2E_CACHE_TRACE_TP,
+	E2E_CACHE_TRACE_TP,
+	E2E_CACHE_TRACE_CT,
 };
 
 struct e2e_cache_trace_entry {
-        enum e2e_cache_trace_type type;
+	enum e2e_cache_trace_type type;
 
-        struct { /* tp entry */
-                const struct tcf_proto *tp;
-                void *fh;
-        };
+	union {
+		struct { /* tp entry */
+			const struct tcf_proto *tp;
+			void *fh;
+		};
+
+		struct { /* ct entry */
+			struct flow_offload *flow;
+			int dir;
+		};
+	};
 };
 
 struct e2e_cache_trace {
@@ -40,6 +51,7 @@ struct e2e_cache_trace {
 	int num_entries;
 
 	int num_tps;
+	int num_conns;
 };
 static DEFINE_PER_CPU(struct e2e_cache_trace, packet_trace);
 
@@ -61,6 +73,8 @@ e2e_cache_trace_tp_impl(struct sk_buff *skb,
 			struct tcf_result *res)
 {
 	struct e2e_cache_trace *trace = this_cpu_ptr(&packet_trace);
+	struct nf_conn *ct;
+	enum ip_conntrack_info ctinfo;
 
 	pr_debug("trace=0x%p\n", trace);
 	if (!(trace->flags & E2E_CACHE_TRACE_CACHEABLE))
@@ -80,6 +94,24 @@ e2e_cache_trace_tp_impl(struct sk_buff *skb,
 	} else if (trace->ops != tp->ops) {
 		pr_debug("trace=0x%p diff ops: 0x%p 0x%p\n", trace, trace->ops, tp->ops);
 		goto not_cacheable;
+	}
+
+	if (classify_ret != TC_ACT_CONSUMED) {
+		/* If ct was executed then make sure to trace only established connections */
+		ct = nf_ct_get(skb, &ctinfo);
+		if (ct &&
+		    (ctinfo != IP_CT_UNTRACKED &&
+		     ctinfo != IP_CT_ESTABLISHED && ctinfo != IP_CT_ESTABLISHED_REPLY)) {
+			pr_debug("trace=0x%p ct_state=%d\n", trace, ctinfo);
+			goto not_cacheable;
+		}
+
+		/* Don't trace tcp connections teardown sequence */
+		if (ct && nf_ct_protonum(ct) == IPPROTO_TCP &&
+		    ct->proto.tcp.state != TCP_CONNTRACK_ESTABLISHED) {
+			pr_debug("trace=0x%p tcp_state=%d\n", trace, ct->proto.tcp.state);
+			goto not_cacheable;
+		}
 	}
 
 	trace->entries[trace->num_entries].type = E2E_CACHE_TRACE_TP;
@@ -107,9 +139,34 @@ e2e_cache_trace_end_impl(struct sk_buff *skb, int classify_result)
 	if (classify_result != TC_ACT_CONSUMED || trace->num_tps < 2)
 		return;
 
-	pr_debug("trace=0x%p processing trace of %d chains\n"
+	pr_debug("trace=0x%p processing trace of %d chains %d connections\n"
 		 , trace
-		 , trace->num_tps);
+		 , trace->num_tps
+		 , trace->num_conns);
+}
+
+static void
+e2e_cache_trace_ct_impl(struct flow_offload *flow, int dir)
+{
+	struct e2e_cache_trace *trace = this_cpu_ptr(&packet_trace);
+
+	if (!trace || !(trace->flags & E2E_CACHE_TRACE_CACHEABLE))
+		return;
+
+	/* This can happen if one filter has several CT actions */
+	if (trace->num_entries == E2E_CACHE_MAX_TRACE_ENTRIES) {
+		pr_debug("trace=0x%p\n", trace);
+		trace->flags &= ~E2E_CACHE_TRACE_CACHEABLE;
+		return;
+	}
+
+	trace->entries[trace->num_entries].type = E2E_CACHE_TRACE_CT;
+	trace->entries[trace->num_entries].flow = flow;
+	trace->entries[trace->num_entries].dir = dir;
+	trace->num_entries++;
+	trace->num_conns++;
+	pr_debug("trace=0x%p flow=0x%p dir=%d num_conns=%d\n", trace
+						             , flow, dir, trace->num_conns);
 }
 
 static struct tcf_e2e_cache *
@@ -143,6 +200,7 @@ static struct e2e_cache_ops e2e_cache_ops = {
 	.trace_begin	= e2e_cache_trace_begin_impl,
 	.trace_tp	= e2e_cache_trace_tp_impl,
 	.trace_end	= e2e_cache_trace_end_impl,
+	.trace_ct	= e2e_cache_trace_ct_impl,
 };
 
 static int

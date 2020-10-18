@@ -59,3 +59,12 @@ void e2e_cache_trace_tp(struct sk_buff *skb, const struct tcf_proto *tp,
 
 	return ops->trace_tp(skb, tp, classify_ret, res);
 }
+
+void e2e_cache_trace_ct(struct flow_offload *flow, int dir)
+{
+	if (!ops)
+		return;
+
+	return ops->trace_ct(flow, dir);
+}
+EXPORT_SYMBOL(e2e_cache_trace_ct);

@@ -595,6 +595,13 @@ static void *fl_get(struct tcf_proto *tp, u32 handle)
 	return __fl_get(head, handle);
 }
 
+static bool fl_take(struct tcf_proto *tp, void *arg)
+{
+	struct cls_fl_filter *f = arg;
+
+	return refcount_inc_not_zero(&f->refcnt);
+}
+
 static const struct nla_policy fl_policy[TCA_FLOWER_MAX + 1] = {
 	[TCA_FLOWER_UNSPEC]		= { .type = NLA_UNSPEC },
 	[TCA_FLOWER_CLASSID]		= { .type = NLA_U32 },
@@ -2544,6 +2551,7 @@ static struct tcf_proto_ops cls_fl_ops __read_mostly = {
 	.init		= fl_init,
 	.destroy	= fl_destroy,
 	.get		= fl_get,
+	.take		= fl_take,
 	.put		= fl_put,
 	.change		= fl_change,
 	.delete		= fl_delete,

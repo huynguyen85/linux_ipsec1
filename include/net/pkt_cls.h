@@ -72,6 +72,10 @@ static inline struct Qdisc *tcf_block_q(struct tcf_block *block)
 
 #define TCF_MAX_RECLASSIFY_LOOP 4
 
+bool tcf_proto_get_not_zero(struct tcf_proto *tp);
+void tcf_proto_put(struct tcf_proto *tp, bool rtnl_held,
+		   struct netlink_ext_ack *extack);
+
 int tcf_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		 struct tcf_result *res, bool compat_mode);
 int tcf_classify_ingress(struct sk_buff *skb,
@@ -146,6 +150,16 @@ static inline int tcf_classify_ingress(struct sk_buff *skb,
 				       struct tcf_result *res, bool compat_mode)
 {
 	return TC_ACT_UNSPEC;
+}
+
+static inline bool tcf_proto_get_not_zero(struct tcf_proto *tp)
+{
+	return false;
+}
+
+static inline void tcf_proto_put(struct tcf_proto *tp, bool rtnl_held,
+				 struct netlink_ext_ack *extack)
+{
 }
 
 #endif

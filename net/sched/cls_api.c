@@ -290,6 +290,12 @@ static void tcf_proto_get(struct tcf_proto *tp)
 	refcount_inc(&tp->refcnt);
 }
 
+bool tcf_proto_get_not_zero(struct tcf_proto *tp)
+{
+	return refcount_inc_not_zero(&tp->refcnt);
+}
+EXPORT_SYMBOL(tcf_proto_get_not_zero);
+
 static void tcf_chain_put(struct tcf_chain *chain);
 
 static void tcf_proto_destroy(struct tcf_proto *tp, bool rtnl_held,
@@ -303,12 +309,13 @@ static void tcf_proto_destroy(struct tcf_proto *tp, bool rtnl_held,
 	kfree_rcu(tp, rcu);
 }
 
-static void tcf_proto_put(struct tcf_proto *tp, bool rtnl_held,
-			  struct netlink_ext_ack *extack)
+void tcf_proto_put(struct tcf_proto *tp, bool rtnl_held,
+		   struct netlink_ext_ack *extack)
 {
 	if (refcount_dec_and_test(&tp->refcnt))
 		tcf_proto_destroy(tp, rtnl_held, true, extack);
 }
+EXPORT_SYMBOL(tcf_proto_put);
 
 static bool tcf_proto_check_delete(struct tcf_proto *tp)
 {

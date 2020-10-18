@@ -4,6 +4,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/percpu.h>
+#include <linux/workqueue.h>
 
 #include <net/e2e_cache_api.h>
 #include <net/pkt_cls.h>
@@ -32,7 +33,7 @@ struct e2e_cache_trace_entry {
 
 	union {
 		struct { /* tp entry */
-			const struct tcf_proto *tp;
+			struct tcf_proto *tp;
 			void *fh;
 		};
 
@@ -52,34 +53,81 @@ struct e2e_cache_trace {
 
 	int num_tps;
 	int num_conns;
-};
-static DEFINE_PER_CPU(struct e2e_cache_trace, packet_trace);
 
+	struct work_struct work;
+};
+
+static DEFINE_PER_CPU(struct e2e_cache_trace *, packet_trace);
+static struct kmem_cache *e2e_cache_mem;
+static struct workqueue_struct *e2e_wq;
+
+static void e2e_cache_trace_release(struct e2e_cache_trace *trace)
+{
+	int i;
+
+	for (i = 0; i < trace->num_entries; i++) {
+		if (trace->entries[i].type == E2E_CACHE_TRACE_TP) {
+			struct tcf_proto *tp = trace->entries[i].tp;
+			void *fh = trace->entries[i].fh;
+
+			if (fh)
+				tp->ops->put(tp, fh);
+			tcf_proto_put(tp, false, NULL);
+		}
+	}
+
+	kmem_cache_free(e2e_cache_mem, trace);
+}
+
+static void e2e_cache_trace_process_work(struct work_struct *work)
+{
+	struct e2e_cache_trace *trace = container_of(work,
+						     struct e2e_cache_trace,
+						     work);
+
+	pr_debug("process work\n");
+	e2e_cache_trace_release(trace);
+}
+
+static void e2e_cache_trace_release_work(struct work_struct *work)
+{
+	struct e2e_cache_trace *trace = container_of(work,
+						     struct e2e_cache_trace,
+						     work);
+
+	pr_debug("release work\n");
+	e2e_cache_trace_release(trace);
+}
 static void
 e2e_cache_trace_begin_impl(struct sk_buff *skb)
 {
-	struct e2e_cache_trace *trace = this_cpu_ptr(&packet_trace);
+	struct e2e_cache_trace **trace = this_cpu_ptr(&packet_trace);
+
+	*trace = kmem_cache_alloc(e2e_cache_mem, GFP_ATOMIC);
+	if (!*trace)
+		return;
 
 	pr_debug("trace=0x%p\n", trace);
-	memset(trace, 0, sizeof(*trace));
+	memset(*trace, 0, sizeof(**trace));
 
-	trace->flags = E2E_CACHE_TRACE_CACHEABLE;
+	(*trace)->flags = E2E_CACHE_TRACE_CACHEABLE;
 }
 
 static void
 e2e_cache_trace_tp_impl(struct sk_buff *skb,
-			const struct tcf_proto *tp,
+			const struct tcf_proto *const_tp,
 			int classify_ret,
 			struct tcf_result *res)
 {
-	struct e2e_cache_trace *trace = this_cpu_ptr(&packet_trace);
-	struct nf_conn *ct;
+	struct e2e_cache_trace *trace = *this_cpu_ptr(&packet_trace);
+	struct tcf_proto *tp = (struct tcf_proto *)const_tp;
 	enum ip_conntrack_info ctinfo;
+	struct nf_conn *ct;
 
-	pr_debug("trace=0x%p\n", trace);
-	if (!(trace->flags & E2E_CACHE_TRACE_CACHEABLE))
+	if (!trace || !(trace->flags & E2E_CACHE_TRACE_CACHEABLE))
 		return;
 
+	pr_debug("trace=0x%p flags=%d\n", trace, trace->flags);
 	if (trace->num_entries >= E2E_CACHE_MAX_TRACE_ENTRIES)
 		goto not_cacheable;
 
@@ -88,9 +136,17 @@ e2e_cache_trace_tp_impl(struct sk_buff *skb,
 	    classify_ret != TC_ACT_CONSUMED)
 		goto not_cacheable;
 
+	/* trace only if we have a fh */
+	if (!res->fh)
+		goto not_cacheable;
+
 	/* trace only classifiers of the same kind */
 	if (!trace->ops) {
 		trace->ops = tp->ops;
+
+		/* trace only classifier supporting cache related ops */
+		if (!tp->ops->take || !tp->ops->put)
+			goto not_cacheable;
 	} else if (trace->ops != tp->ops) {
 		pr_debug("trace=0x%p diff ops: 0x%p 0x%p\n", trace, trace->ops, tp->ops);
 		goto not_cacheable;
@@ -114,9 +170,20 @@ e2e_cache_trace_tp_impl(struct sk_buff *skb,
 		}
 	}
 
+	if (!tcf_proto_get_not_zero(tp)) {
+		pr_debug("trace=0x%p can't take tp\n", trace);
+		goto not_cacheable;
+	}
+	trace->entries[trace->num_entries].tp = tp;
 	trace->entries[trace->num_entries].type = E2E_CACHE_TRACE_TP;
 	trace->entries[trace->num_entries].tp = (struct tcf_proto *)tp;
-	trace->entries[trace->num_entries].fh = res->fh;
+	if (tp->ops->take(tp, res->fh)) {
+		trace->entries[trace->num_entries].fh = res->fh;
+	} else {
+		pr_debug("trace=0x%p can't take fh\n", trace);
+		trace->flags &= ~E2E_CACHE_TRACE_CACHEABLE;
+	}
+
 	trace->num_entries++;
 	trace->num_tps++;
 	return;
@@ -129,26 +196,47 @@ not_cacheable:
 static void
 e2e_cache_trace_end_impl(struct sk_buff *skb, int classify_result)
 {
-	struct e2e_cache_trace *trace = this_cpu_ptr(&packet_trace);
+	struct e2e_cache_trace **pcputrace = this_cpu_ptr(&packet_trace);
+	struct e2e_cache_trace *trace = *pcputrace;
 
+	if (!trace)
+		return;
+
+	*pcputrace = NULL;
 	pr_debug("trace=0x%p flags=%d\n", trace, trace->flags);
 
 	if (!(trace->flags & E2E_CACHE_TRACE_CACHEABLE))
-		return;
+		goto trace_failed;
 
 	if (classify_result != TC_ACT_CONSUMED || trace->num_tps < 2)
-		return;
+		goto trace_failed;
 
 	pr_debug("trace=0x%p processing trace of %d chains %d connections\n"
 		 , trace
 		 , trace->num_tps
 		 , trace->num_conns);
+
+	INIT_WORK(&trace->work, e2e_cache_trace_process_work);
+	queue_work(e2e_wq, &trace->work);
+	return;
+
+trace_failed:
+	pr_debug("cleaning up trace of %d chains\n", trace->num_tps);
+	if (trace->num_entries) {
+		/* Releasing tp or filter instance is potentially sleeping and
+		 * must be done on workqueue.
+		 */
+		INIT_WORK(&trace->work, e2e_cache_trace_release_work);
+		queue_work(e2e_wq, &trace->work);
+	} else {
+		e2e_cache_trace_release(trace);
+	}
 }
 
 static void
 e2e_cache_trace_ct_impl(struct flow_offload *flow, int dir)
 {
-	struct e2e_cache_trace *trace = this_cpu_ptr(&packet_trace);
+	struct e2e_cache_trace *trace = *this_cpu_ptr(&packet_trace);
 
 	if (!trace || !(trace->flags & E2E_CACHE_TRACE_CACHEABLE))
 		return;
@@ -206,6 +294,16 @@ static struct e2e_cache_ops e2e_cache_ops = {
 static int
 __init e2e_cache_init(void)
 {
+	e2e_cache_mem = KMEM_CACHE(e2e_cache_trace, SLAB_HWCACHE_ALIGN);
+	if (!e2e_cache_mem)
+		return -ENOMEM;
+
+	e2e_wq = alloc_workqueue("tc_e2e_workqueue", WQ_UNBOUND, 0);
+	if(!e2e_wq) {
+		kmem_cache_destroy(e2e_cache_mem);
+		return -ENOMEM;
+	}
+
 	e2e_cache_register_ops(&e2e_cache_ops);
 	return 0;
 }
@@ -214,6 +312,9 @@ static void
 __exit e2e_cache_exit(void)
 {
 	e2e_cache_unregister_ops();
+	destroy_workqueue(e2e_wq);
+	kmem_cache_destroy(e2e_cache_mem);
+
 }
 
 module_init(e2e_cache_init);

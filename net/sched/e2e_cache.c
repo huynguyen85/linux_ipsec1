@@ -3,12 +3,114 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
+#include <linux/percpu.h>
 
 #include <net/e2e_cache_api.h>
+#include <net/pkt_cls.h>
 
 struct tcf_e2e_cache {
 	struct tcf_chain *tcf_e2e_chain;
 };
+
+enum {
+	E2E_CACHE_TRACE_CACHEABLE  = BIT(0),
+};
+
+/* Number of reclassify + single CT per classify */
+#define E2E_CACHE_MAX_TRACE_ENTRIES (TCF_MAX_RECLASSIFY_LOOP * 2)
+
+enum e2e_cache_trace_type {
+        E2E_CACHE_TRACE_TP,
+};
+
+struct e2e_cache_trace_entry {
+        enum e2e_cache_trace_type type;
+
+        struct { /* tp entry */
+                const struct tcf_proto *tp;
+                void *fh;
+        };
+};
+
+struct e2e_cache_trace {
+	u32 flags;
+	const struct tcf_proto_ops *ops;
+
+	struct e2e_cache_trace_entry entries[E2E_CACHE_MAX_TRACE_ENTRIES];
+	int num_entries;
+
+	int num_tps;
+};
+static DEFINE_PER_CPU(struct e2e_cache_trace, packet_trace);
+
+static void
+e2e_cache_trace_begin_impl(struct sk_buff *skb)
+{
+	struct e2e_cache_trace *trace = this_cpu_ptr(&packet_trace);
+
+	pr_debug("trace=0x%p\n", trace);
+	memset(trace, 0, sizeof(*trace));
+
+	trace->flags = E2E_CACHE_TRACE_CACHEABLE;
+}
+
+static void
+e2e_cache_trace_tp_impl(struct sk_buff *skb,
+			const struct tcf_proto *tp,
+			int classify_ret,
+			struct tcf_result *res)
+{
+	struct e2e_cache_trace *trace = this_cpu_ptr(&packet_trace);
+
+	pr_debug("trace=0x%p\n", trace);
+	if (!(trace->flags & E2E_CACHE_TRACE_CACHEABLE))
+		return;
+
+	if (trace->num_entries >= E2E_CACHE_MAX_TRACE_ENTRIES)
+		goto not_cacheable;
+
+	/* only filters with goto chain actions may be cached */
+	if (!TC_ACT_EXT_CMP(classify_ret, TC_ACT_GOTO_CHAIN) &&
+	    classify_ret != TC_ACT_CONSUMED)
+		goto not_cacheable;
+
+	/* trace only classifiers of the same kind */
+	if (!trace->ops) {
+		trace->ops = tp->ops;
+	} else if (trace->ops != tp->ops) {
+		pr_debug("trace=0x%p diff ops: 0x%p 0x%p\n", trace, trace->ops, tp->ops);
+		goto not_cacheable;
+	}
+
+	trace->entries[trace->num_entries].type = E2E_CACHE_TRACE_TP;
+	trace->entries[trace->num_entries].tp = (struct tcf_proto *)tp;
+	trace->entries[trace->num_entries].fh = res->fh;
+	trace->num_entries++;
+	trace->num_tps++;
+	return;
+
+not_cacheable:
+	pr_debug("trace not cacheable\n");
+	trace->flags &= ~E2E_CACHE_TRACE_CACHEABLE;
+}
+
+static void
+e2e_cache_trace_end_impl(struct sk_buff *skb, int classify_result)
+{
+	struct e2e_cache_trace *trace = this_cpu_ptr(&packet_trace);
+
+	pr_debug("trace=0x%p flags=%d\n", trace, trace->flags);
+
+	if (!(trace->flags & E2E_CACHE_TRACE_CACHEABLE))
+		return;
+
+	if (classify_result != TC_ACT_CONSUMED || trace->num_tps < 2)
+		return;
+
+	pr_debug("trace=0x%p processing trace of %d chains\n"
+		 , trace
+		 , trace->num_tps);
+}
 
 static struct tcf_e2e_cache *
 e2e_cache_create_impl(struct tcf_chain *tcf_e2e_chain)
@@ -38,6 +140,9 @@ e2e_cache_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache)
 static struct e2e_cache_ops e2e_cache_ops = {
 	.create		= e2e_cache_create_impl,
 	.destroy	= e2e_cache_destroy_impl,
+	.trace_begin	= e2e_cache_trace_begin_impl,
+	.trace_tp	= e2e_cache_trace_tp_impl,
+	.trace_end	= e2e_cache_trace_end_impl,
 };
 
 static int

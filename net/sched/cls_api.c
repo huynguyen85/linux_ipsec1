@@ -1594,7 +1594,6 @@ static inline int __tcf_classify(struct sk_buff *skb,
 				 u32 *last_executed_chain)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	const int max_reclassify_loop = 4;
 	const struct tcf_proto *first_tp;
 	int limit = 0;
 
@@ -1609,6 +1608,8 @@ reclassify:
 			continue;
 
 		err = tp->classify(skb, tp, res);
+		if (tp->chain->block->tcf_e2e_cache && err >= 0)
+			e2e_cache_trace_tp(skb, tp, err, res);
 #ifdef CONFIG_NET_CLS_ACT
 		if (unlikely(err == TC_ACT_RECLASSIFY && !compat_mode)) {
 			first_tp = orig_tp;
@@ -1627,7 +1628,7 @@ reclassify:
 	return TC_ACT_UNSPEC; /* signal: continue lookup */
 #ifdef CONFIG_NET_CLS_ACT
 reset:
-	if (unlikely(limit++ >= max_reclassify_loop)) {
+	if (unlikely(limit++ >= TCF_MAX_RECLASSIFY_LOOP)) {
 		net_notice_ratelimited("%u: reclassify loop, rule prio %u, protocol %02x\n",
 				       tp->chain->block->index,
 				       tp->prio & 0xffff,
@@ -1682,8 +1683,14 @@ int tcf_classify_ingress(struct sk_buff *skb,
 		last_executed_chain = fchain->index;
 	}
 
+	if (tp && tp->chain->block->tcf_e2e_cache)
+		e2e_cache_trace_begin(skb);
+
 	ret = __tcf_classify(skb, tp, orig_tp, res, compat_mode,
 			     &last_executed_chain);
+
+	if (tp && tp->chain->block->tcf_e2e_cache)
+		e2e_cache_trace_end(skb, ret);
 
 	/* If we missed on some chain */
 	if (ret == TC_ACT_UNSPEC && last_executed_chain) {

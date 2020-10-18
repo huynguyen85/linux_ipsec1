@@ -275,7 +275,11 @@ struct tcf_result {
 			unsigned long	class;
 			u32		classid;
 		};
-		const struct tcf_proto *goto_tp;
+
+		struct {
+			const struct tcf_proto *goto_tp;
+			void *fh; /* for tcf e2e trace to get classify's last fh */
+		};
 
 		/* used in the skb_tc_reinsert function */
 		struct {

@@ -34,3 +34,28 @@ void e2e_cache_destroy(struct tcf_e2e_cache *tcf_e2e_cache)
 
 	return ops->destroy(tcf_e2e_cache);
 }
+
+void e2e_cache_trace_begin(struct sk_buff *skb)
+{
+	if (!ops)
+		return;
+
+	return ops->trace_begin(skb);
+}
+
+void e2e_cache_trace_end(struct sk_buff *skb, int classify_result)
+{
+	if (!ops)
+		return;
+
+	return ops->trace_end(skb, classify_result);
+}
+
+void e2e_cache_trace_tp(struct sk_buff *skb, const struct tcf_proto *tp,
+			int classify_ret, struct tcf_result *res)
+{
+	if (!ops)
+		return;
+
+	return ops->trace_tp(skb, tp, classify_ret, res);
+}

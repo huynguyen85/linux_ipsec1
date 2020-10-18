@@ -70,6 +70,8 @@ static inline struct Qdisc *tcf_block_q(struct tcf_block *block)
 	return block->q;
 }
 
+#define TCF_MAX_RECLASSIFY_LOOP 4
+
 int tcf_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		 struct tcf_result *res, bool compat_mode);
 int tcf_classify_ingress(struct sk_buff *skb,

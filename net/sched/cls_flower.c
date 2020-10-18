@@ -322,6 +322,7 @@ static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		f = fl_lookup(mask, &skb_mkey, &skb_key);
 		if (f && !tc_skip_sw(f->flags)) {
 			*res = f->res;
+			res->fh = f;
 			return tcf_exts_exec(skb, &f->exts, res);
 		}
 	}

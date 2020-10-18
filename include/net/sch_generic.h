@@ -334,6 +334,9 @@ struct tcf_proto_ops {
 						struct nlattr **tca,
 						struct netlink_ext_ack *extack);
 	void			(*tmplt_destroy)(void *tmplt_priv);
+	void			(*get_hw_stats)(struct tcf_proto *tp, void *fh,
+						struct flow_stats *stats);
+	struct tcf_exts *	(*get_exts)(const struct tcf_proto *tp, void *fh);
 
 	/* rtnetlink specific */
 	int			(*dump)(struct net*, struct tcf_proto*, void *,

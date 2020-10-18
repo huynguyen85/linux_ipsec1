@@ -5,9 +5,16 @@
 #include <linux/slab.h>
 #include <linux/percpu.h>
 #include <linux/workqueue.h>
+#include <linux/jhash.h>
+#include <linux/bitmap.h>
+#include <linux/in.h>
+#include <linux/udp.h>
+#include <linux/tcp.h>
 
 #include <net/e2e_cache_api.h>
 #include <net/pkt_cls.h>
+#include <net/ip.h>
+#include <net/ipv6.h>
 
 #include <linux/skbuff.h>
 #include <net/netfilter/nf_conntrack.h>
@@ -44,6 +51,24 @@ struct e2e_cache_trace_entry {
 	};
 };
 
+struct e2e_cache_tuple {
+	union {
+		struct in_addr          src_v4;
+		struct in6_addr         src_v6;
+	};
+	union {
+		struct in_addr          dst_v4;
+		struct in6_addr         dst_v6;
+	};
+	struct {
+		__be16                  src_port;
+		__be16                  dst_port;
+	};
+
+	u8                              l3proto;
+	u8                              l4proto;
+};
+
 struct e2e_cache_trace {
 	u32 flags;
 	const struct tcf_proto_ops *ops;
@@ -53,13 +78,131 @@ struct e2e_cache_trace {
 
 	int num_tps;
 	int num_conns;
+	u32 hash;
 
 	struct work_struct work;
 };
 
+#define E2E_TRACING_BM_SIZE (1 << 23)
+
 static DEFINE_PER_CPU(struct e2e_cache_trace *, packet_trace);
+static DECLARE_BITMAP(e2e_tracing_bm, E2E_TRACING_BM_SIZE) = {0};
 static struct kmem_cache *e2e_cache_mem;
 static struct workqueue_struct *e2e_wq;
+
+static bool
+e2e_cache_extract_ipv4(struct sk_buff *skb, struct e2e_cache_tuple *tuple)
+{
+	struct iphdr *iph;
+
+	if (!pskb_network_may_pull(skb, sizeof(*iph)))
+		return false;
+
+	iph = ip_hdr(skb);
+	if (ip_is_fragment(iph))
+		return false;
+
+	tuple->l3proto = AF_INET;
+	tuple->l4proto = iph->protocol;
+	tuple->src_v4.s_addr = iph->saddr;
+	tuple->dst_v4.s_addr = iph->daddr;
+
+	if (iph->protocol == IPPROTO_UDP) {
+		struct udphdr *udph;
+
+		if (!pskb_may_pull(skb, skb_transport_offset(skb) + sizeof(*udph)))
+			return false;
+
+		udph = udp_hdr(skb);
+		tuple->src_port = udph->source;
+		tuple->dst_port = udph->dest;
+	} else if (iph->protocol == IPPROTO_TCP) {
+		struct tcphdr *tcph;
+
+		if (!pskb_may_pull(skb, skb_transport_offset(skb) + sizeof(*tcph)))
+			return false;
+
+		tcph = tcp_hdr(skb);
+		tuple->src_port = tcph->source;
+		tuple->dst_port = tcph->dest;
+	} else {
+		return false;
+	}
+
+	return true;
+}
+
+static bool
+e2e_cache_extract_ipv6(struct sk_buff *skb, struct e2e_cache_tuple *tuple)
+{
+	unsigned int offset = 0;
+	unsigned short fragoff;
+	struct ipv6hdr *ip6h;
+	int nexthdr;
+
+	if (!pskb_network_may_pull(skb, sizeof(*ip6h)))
+		return false;
+
+	ip6h = ipv6_hdr(skb);
+	tuple->l3proto = AF_INET6;
+	tuple->src_v6 = ip6h->saddr;
+	tuple->dst_v6 = ip6h->daddr;
+
+	nexthdr = ipv6_find_hdr(skb, &offset, -1, &fragoff, NULL);
+	if (fragoff)
+		return false;
+	tuple->l4proto = nexthdr;
+
+	if (nexthdr == IPPROTO_UDP) {
+		struct udphdr *udph;
+
+		if (!pskb_may_pull(skb, offset + sizeof(*udph)))
+			return false;
+
+		udph = udp_hdr(skb);
+		tuple->src_port = udph->source;
+		tuple->dst_port = udph->dest;
+	} else if (nexthdr == IPPROTO_TCP) {
+		struct tcphdr *tcph;
+
+		if (!pskb_may_pull(skb, offset + sizeof(*tcph)))
+			return false;
+
+		tcph = tcp_hdr(skb);
+		tuple->src_port = tcph->source;
+		tuple->dst_port = tcph->dest;
+	} else {
+		return false;
+	}
+
+	return true;
+}
+
+static bool
+e2e_cache_extract_tuple(struct sk_buff *skb, struct e2e_cache_tuple *tuple)
+{
+	__be16 proto = skb_protocol(skb, true);
+
+	if (proto == htons(ETH_P_IP))
+		return e2e_cache_extract_ipv4(skb, tuple);
+	else if (proto == htons(ETH_P_IPV6))
+		return e2e_cache_extract_ipv6(skb, tuple);
+	else
+		return false;
+}
+
+static bool
+e2e_cache_mark_tracing(struct e2e_cache_tuple *tuple, u32 *hash)
+{
+	*hash = jhash(tuple, sizeof(*tuple), 0) % E2E_TRACING_BM_SIZE;
+	return !test_and_set_bit(*hash, e2e_tracing_bm);
+}
+
+static void
+e2e_cache_unmark_tracing(u32 hash)
+{
+	clear_bit(hash, e2e_tracing_bm);
+}
 
 static void e2e_cache_trace_release(struct e2e_cache_trace *trace)
 {
@@ -76,6 +219,7 @@ static void e2e_cache_trace_release(struct e2e_cache_trace *trace)
 		}
 	}
 
+	e2e_cache_unmark_tracing(trace->hash);
 	kmem_cache_free(e2e_cache_mem, trace);
 }
 
@@ -102,15 +246,35 @@ static void
 e2e_cache_trace_begin_impl(struct sk_buff *skb)
 {
 	struct e2e_cache_trace **trace = this_cpu_ptr(&packet_trace);
+	struct e2e_cache_tuple tuple;
+	u32 hash;
+
+	memset(&tuple, 0, sizeof(tuple));
+
+	if (!e2e_cache_extract_tuple(skb, &tuple)) {
+		pr_debug("extract tuple failed\n");
+		return;
+	}
+
+	if (!e2e_cache_mark_tracing(&tuple, &hash)) {
+		pr_debug("tuple already being traced\n");
+		return;
+	}
 
 	*trace = kmem_cache_alloc(e2e_cache_mem, GFP_ATOMIC);
-	if (!*trace)
+	if (!*trace) {
+		e2e_cache_unmark_tracing(hash);
 		return;
+	}
 
-	pr_debug("trace=0x%p\n", trace);
+	pr_debug("l3=%hhu l4=%hhu %pI4:%hu to %pI4:%hu (%u)\n",
+		 tuple.l3proto, tuple.l4proto,
+		 &tuple.src_v4, ntohs(tuple.src_port), &tuple.dst_v4, ntohs(tuple.dst_port),
+		 hash);
 	memset(*trace, 0, sizeof(**trace));
 
 	(*trace)->flags = E2E_CACHE_TRACE_CACHEABLE;
+	(*trace)->hash = hash;
 }
 
 static void
@@ -174,7 +338,7 @@ e2e_cache_trace_tp_impl(struct sk_buff *skb,
 		pr_debug("trace=0x%p can't take tp\n", trace);
 		goto not_cacheable;
 	}
-	trace->entries[trace->num_entries].tp = tp;
+
 	trace->entries[trace->num_entries].type = E2E_CACHE_TRACE_TP;
 	trace->entries[trace->num_entries].tp = (struct tcf_proto *)tp;
 	if (tp->ops->take(tp, res->fh)) {

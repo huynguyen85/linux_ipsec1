@@ -868,6 +868,40 @@ static const struct nla_policy tcf_action_policy[TCA_ACT_MAX + 1] = {
 	[TCA_ACT_FLAGS]		= NLA_POLICY_BITFIELD32(TCA_ACT_FLAGS_NO_PERCPU_STATS),
 };
 
+static struct tc_action_ops* tc_get_action_n(char *act_name, bool rtnl_held,
+					     struct netlink_ext_ack *extack)
+{
+	struct tc_action_ops *a_o;
+
+	a_o = tc_lookup_action_n(act_name);
+	if (a_o == NULL) {
+#ifdef CONFIG_MODULES
+		if (rtnl_held)
+			rtnl_unlock();
+		request_module("act_%s", act_name);
+		if (rtnl_held)
+			rtnl_lock();
+
+		a_o = tc_lookup_action_n(act_name);
+
+		/* We dropped the RTNL semaphore in order to
+		 * perform the module load.  So, even if we
+		 * succeeded in loading the module we have to
+		 * tell the caller to replay the request.  We
+		 * indicate this using -EAGAIN.
+		 */
+		if (a_o != NULL) {
+			module_put(a_o->owner);
+			return ERR_PTR(-EAGAIN);
+		}
+#endif
+		NL_SET_ERR_MSG(extack, "Failed to load TC action module");
+		return ERR_PTR(-ENOENT);
+	}
+
+	return a_o;
+}
+
 struct tc_action *tcf_action_init_1(struct net *net, struct tcf_proto *tp,
 				    struct nlattr *nla, struct nlattr *est,
 				    char *name, int ovr, int bind,
@@ -916,30 +950,9 @@ struct tc_action *tcf_action_init_1(struct net *net, struct tcf_proto *tp,
 		}
 	}
 
-	a_o = tc_lookup_action_n(act_name);
-	if (a_o == NULL) {
-#ifdef CONFIG_MODULES
-		if (rtnl_held)
-			rtnl_unlock();
-		request_module("act_%s", act_name);
-		if (rtnl_held)
-			rtnl_lock();
-
-		a_o = tc_lookup_action_n(act_name);
-
-		/* We dropped the RTNL semaphore in order to
-		 * perform the module load.  So, even if we
-		 * succeeded in loading the module we have to
-		 * tell the caller to replay the request.  We
-		 * indicate this using -EAGAIN.
-		 */
-		if (a_o != NULL) {
-			err = -EAGAIN;
-			goto err_mod;
-		}
-#endif
-		NL_SET_ERR_MSG(extack, "Failed to load TC action module");
-		err = -ENOENT;
+	a_o = tc_get_action_n(act_name, rtnl_held, extack);
+	if (IS_ERR(a_o)) {
+		err = PTR_ERR(a_o);
 		goto err_out;
 	}
 

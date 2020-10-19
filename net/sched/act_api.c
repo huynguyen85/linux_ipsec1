@@ -737,12 +737,13 @@ int tcf_action_destroy(struct tc_action *actions[], int bind)
 	return ret;
 }
 
-static int tcf_action_destroy_1(struct tc_action *a, int bind)
+int tcf_action_destroy_1(struct tc_action *a, int bind)
 {
 	struct tc_action *actions[] = { a, NULL };
 
 	return tcf_action_destroy(actions, bind);
 }
+EXPORT_SYMBOL(tcf_action_destroy_1);
 
 static int tcf_action_put(struct tc_action *p)
 {
@@ -994,6 +995,7 @@ err_out:
 	}
 	return ERR_PTR(err);
 }
+EXPORT_SYMBOL(tcf_action_init_1);
 
 /* Returns numbers of initialized actions or negative error. */
 

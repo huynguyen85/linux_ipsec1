@@ -141,51 +141,49 @@ static int tcf_pedit_init(struct net *net, struct nlattr *nla,
 			  struct netlink_ext_ack *extack)
 {
 	struct tc_action_net *tn = net_generic(net, pedit_net_id);
+	struct tcf_pedit_key_ex *keys_ex = NULL;
 	struct nlattr *tb[TCA_PEDIT_MAX + 1];
 	struct tcf_chain *goto_ch = NULL;
 	struct tc_pedit_key *keys = NULL;
-	struct tcf_pedit_key_ex *keys_ex;
-	struct tc_pedit *parm;
+	struct tc_pedit *parm = NULL;
 	struct nlattr *pattr;
 	struct tcf_pedit *p;
 	int ret = 0, err;
+	u32 index = 0;
 	int ksize;
-	u32 index;
 
-	if (!nla) {
-		NL_SET_ERR_MSG_MOD(extack, "Pedit requires attributes to be passed");
-		return -EINVAL;
+	if (nla) {
+		err = nla_parse_nested_deprecated(tb, TCA_PEDIT_MAX, nla,
+						  pedit_policy, NULL);
+		if (err < 0)
+			return err;
+
+		pattr = tb[TCA_PEDIT_PARMS];
+		if (!pattr)
+			pattr = tb[TCA_PEDIT_PARMS_EX];
+		if (!pattr) {
+			NL_SET_ERR_MSG_MOD(extack, "Missing required TCA_PEDIT_PARMS or TCA_PEDIT_PARMS_EX pedit attribute");
+			return -EINVAL;
+		}
+
+		parm = nla_data(pattr);
+		if (!parm->nkeys) {
+			NL_SET_ERR_MSG_MOD(extack, "Pedit requires keys to be passed");
+			return -EINVAL;
+		}
+		ksize = parm->nkeys * sizeof(struct tc_pedit_key);
+		if (nla_len(pattr) < sizeof(*parm) + ksize) {
+			NL_SET_ERR_MSG_ATTR(extack, pattr, "Length of TCA_PEDIT_PARMS or TCA_PEDIT_PARMS_EX pedit attribute is invalid");
+			return -EINVAL;
+		}
+
+		keys_ex = tcf_pedit_keys_ex_parse(tb[TCA_PEDIT_KEYS_EX], parm->nkeys);
+		if (IS_ERR(keys_ex))
+			return PTR_ERR(keys_ex);
+
+		index = parm->index;
 	}
 
-	err = nla_parse_nested_deprecated(tb, TCA_PEDIT_MAX, nla,
-					  pedit_policy, NULL);
-	if (err < 0)
-		return err;
-
-	pattr = tb[TCA_PEDIT_PARMS];
-	if (!pattr)
-		pattr = tb[TCA_PEDIT_PARMS_EX];
-	if (!pattr) {
-		NL_SET_ERR_MSG_MOD(extack, "Missing required TCA_PEDIT_PARMS or TCA_PEDIT_PARMS_EX pedit attribute");
-		return -EINVAL;
-	}
-
-	parm = nla_data(pattr);
-	if (!parm->nkeys) {
-		NL_SET_ERR_MSG_MOD(extack, "Pedit requires keys to be passed");
-		return -EINVAL;
-	}
-	ksize = parm->nkeys * sizeof(struct tc_pedit_key);
-	if (nla_len(pattr) < sizeof(*parm) + ksize) {
-		NL_SET_ERR_MSG_ATTR(extack, pattr, "Length of TCA_PEDIT_PARMS or TCA_PEDIT_PARMS_EX pedit attribute is invalid");
-		return -EINVAL;
-	}
-
-	keys_ex = tcf_pedit_keys_ex_parse(tb[TCA_PEDIT_KEYS_EX], parm->nkeys);
-	if (IS_ERR(keys_ex))
-		return PTR_ERR(keys_ex);
-
-	index = parm->index;
 	err = tcf_idr_check_alloc(tn, &index, a, bind);
 	if (!err) {
 		ret = tcf_idr_create(tn, index, est, a,
@@ -207,37 +205,44 @@ static int tcf_pedit_init(struct net *net, struct nlattr *nla,
 		goto out_free;
 	}
 
-	err = tcf_action_check_ctrlact(parm->action, tp, &goto_ch, extack);
-	if (err < 0) {
-		ret = err;
-		goto out_release;
-	}
-	p = to_pedit(*a);
-	spin_lock_bh(&p->tcf_lock);
-
-	if (ret == ACT_P_CREATED ||
-	    (p->tcfp_nkeys && p->tcfp_nkeys != parm->nkeys)) {
-		keys = kmalloc(ksize, GFP_ATOMIC);
-		if (!keys) {
-			spin_unlock_bh(&p->tcf_lock);
-			ret = -ENOMEM;
-			goto put_chain;
+	if (parm) {
+		err = tcf_action_check_ctrlact(parm->action, tp, &goto_ch, extack);
+		if (err < 0) {
+			ret = err;
+			goto out_release;
 		}
-		kfree(p->tcfp_keys);
-		p->tcfp_keys = keys;
-		p->tcfp_nkeys = parm->nkeys;
 	}
-	memcpy(p->tcfp_keys, parm->keys, ksize);
 
-	p->tcfp_flags = parm->flags;
-	goto_ch = tcf_action_set_ctrlact(*a, parm->action, goto_ch);
+	if (parm) {
+		p = to_pedit(*a);
 
-	kfree(p->tcfp_keys_ex);
-	p->tcfp_keys_ex = keys_ex;
+		spin_lock_bh(&p->tcf_lock);
 
-	spin_unlock_bh(&p->tcf_lock);
-	if (goto_ch)
-		tcf_chain_put_by_act(goto_ch);
+		if (ret == ACT_P_CREATED ||
+		    (p->tcfp_nkeys && p->tcfp_nkeys != parm->nkeys)) {
+			keys = kmalloc(ksize, GFP_ATOMIC);
+			if (!keys) {
+				spin_unlock_bh(&p->tcf_lock);
+				ret = -ENOMEM;
+				goto put_chain;
+			}
+			kfree(p->tcfp_keys);
+			p->tcfp_keys = keys;
+			p->tcfp_nkeys = parm->nkeys;
+		}
+		memcpy(p->tcfp_keys, parm->keys, ksize);
+
+		p->tcfp_flags = parm->flags;
+		goto_ch = tcf_action_set_ctrlact(*a, parm->action, goto_ch);
+
+		kfree(p->tcfp_keys_ex);
+		p->tcfp_keys_ex = keys_ex;
+
+		spin_unlock_bh(&p->tcf_lock);
+		if (goto_ch)
+			tcf_chain_put_by_act(goto_ch);
+	}
+
 	if (ret == ACT_P_CREATED)
 		tcf_idr_insert(tn, *a);
 	return ret;

@@ -619,6 +619,28 @@ e2e_cache_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache)
 	pr_debug("Cache destroyed\n");
 }
 
+static int
+e2e_cache_classify_impl(struct tcf_e2e_cache *tcf_e2e_cache,
+			struct sk_buff *skb,
+			struct tcf_result *res)
+{
+	struct tcf_chain *cache_chain = tcf_e2e_cache->tcf_e2e_chain;
+	struct tcf_proto *tp;
+
+	for (tp = rcu_dereference_bh(cache_chain->filter_chain);
+	     tp; tp = rcu_dereference_bh(tp->next)) {
+		int err = tp->classify(skb, tp, res);
+
+		if (err >= 0) {
+			pr_debug("Cache classify hit\n");
+			return err;
+		}
+	}
+
+	pr_debug("Cache classify miss\n");
+	return -1;
+}
+
 static struct e2e_cache_ops e2e_cache_ops = {
 	.create		= e2e_cache_create_impl,
 	.destroy	= e2e_cache_destroy_impl,
@@ -629,6 +651,7 @@ static struct e2e_cache_ops e2e_cache_ops = {
 	.tp_destroy	= e2e_cache_tp_destroy_impl,
 	.filter_delete	= e2e_cache_filter_delete_impl,
 	.filter_update_stats	= e2e_cache_filter_update_stats_impl,
+	.classify	= e2e_cache_classify_impl,
 };
 
 static int

@@ -1607,8 +1607,17 @@ static inline int __tcf_classify(struct sk_buff *skb,
 	const struct tcf_proto *first_tp;
 	int limit = 0;
 
+	if (tp && tp->chain->block->tcf_e2e_cache) {
+		struct tcf_e2e_cache *e2e_cache = tp->chain->block->tcf_e2e_cache;
+		int err = e2e_cache_classify(e2e_cache, skb, res);
+
+		if (err >= 0)
+			return err;
+	}
+
 reclassify:
 #endif
+
 	for (; tp; tp = rcu_dereference_bh(tp->next)) {
 		__be16 protocol = skb_protocol(skb, false);
 		int err;
@@ -1618,7 +1627,7 @@ reclassify:
 			continue;
 
 		err = tp->classify(skb, tp, res);
-		if (tp->chain->block->tcf_e2e_cache && err >= 0)
+		if (tp->chain->block->tcf_e2e_chain && err >= 0)
 			e2e_cache_trace_tp(skb, tp, err, res);
 #ifdef CONFIG_NET_CLS_ACT
 		if (unlikely(err == TC_ACT_RECLASSIFY && !compat_mode)) {

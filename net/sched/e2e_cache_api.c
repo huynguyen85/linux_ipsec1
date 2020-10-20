@@ -93,3 +93,14 @@ void e2e_cache_trace_ct(struct flow_offload *flow, int dir)
 	return ops->trace_ct(flow, dir);
 }
 EXPORT_SYMBOL(e2e_cache_trace_ct);
+
+int e2e_cache_classify(struct tcf_e2e_cache *tcf_e2e_cache,
+		       struct sk_buff *skb,
+		       struct tcf_result *res)
+{
+	if (!ops)
+		return -1;
+
+	return ops->classify(tcf_e2e_cache, skb, res);
+}
+EXPORT_SYMBOL(e2e_cache_classify);

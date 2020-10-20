@@ -2133,7 +2133,7 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 
 	/* copy actions */
 	tcf_exts_for_each_action(i, act, &last_f->exts) {
-		tcf_action_get(act);
+		tcf_action_get(act, true);
 		fnew->exts.actions[fnew->exts.nr_actions++] = act;
 	}
 

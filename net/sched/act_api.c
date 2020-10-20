@@ -142,12 +142,14 @@ static int __tcf_action_put(struct tc_action *p, bool bind)
 	return 0;
 }
 
-void tcf_action_get(struct tc_action *p)
+void tcf_action_get(struct tc_action *p, bool bind)
 {
 	struct tcf_idrinfo *idrinfo = p->idrinfo;
 
 	mutex_lock(&idrinfo->lock);
 	refcount_inc(&p->tcfa_refcnt);
+	if (bind)
+		atomic_inc(&p->tcfa_bindcnt);
 	mutex_unlock(&idrinfo->lock);
 }
 EXPORT_SYMBOL(tcf_action_get);

@@ -25,6 +25,8 @@
 #include <net/flow_dissector.h>
 #include <net/geneve.h>
 #include <net/netfilter/nf_conntrack.h>
+#include <net/act_api.h>
+#include <net/tc_act/tc_pedit.h>
 
 #include <net/dst.h>
 #include <net/dst_metadata.h>
@@ -1812,6 +1814,204 @@ static int fl_set_key_from_tuple(struct flow_offload_tuple *tuple,
 	return 0;
 }
 
+#define MAX_PEDIT_OFFSETS 16
+struct tc_pedit_tmp {
+	unsigned char nkeys;
+	struct tc_pedit_key keys[MAX_PEDIT_OFFSETS];
+	struct tcf_pedit_key_ex keys_ex[MAX_PEDIT_OFFSETS];
+};
+
+static void fl_add_mangle_action(struct tc_pedit_tmp *p,
+				 enum pedit_header_type htype,
+				 u32 offset, u32 mask, u32 val)
+{
+	int index = p->nkeys;
+	struct tc_pedit_key *key = &p->keys[index];
+	struct tcf_pedit_key_ex *key_ex = &p->keys_ex[index];
+
+	key_ex->cmd = TCA_PEDIT_KEY_EX_CMD_SET;
+	key_ex->htype = htype;
+	key->off = offset;
+	key->mask = ~mask;
+	key->val = val;
+	p->nkeys++;
+}
+
+static void fl_add_ct_nat_tcp(struct nf_conn *ct,
+			      struct flow_offload_tuple *tuple,
+			      struct flow_offload_tuple *target,
+			      struct tc_pedit_tmp *p)
+{
+	if (!(ct->status & IPS_NAT_MASK))
+		return;
+
+	if (memcmp(&target->dst_port, &tuple->dst_port, sizeof(target->dst_port)))
+		fl_add_mangle_action(p, TCA_PEDIT_KEY_EX_HDR_TYPE_TCP,
+				     0,
+				     0xFFFF0000, target->dst_port << 16);
+
+	if (memcmp(&target->src_port, &tuple->src_port, sizeof(target->src_port)))
+		fl_add_mangle_action(p, TCA_PEDIT_KEY_EX_HDR_TYPE_TCP,
+				     0,
+				     0xFFFF, target->src_port);
+}
+
+static void fl_add_ct_nat_udp(struct nf_conn *ct,
+			      struct flow_offload_tuple *tuple,
+			      struct flow_offload_tuple *target,
+			      struct tc_pedit_tmp *p)
+{
+	if (!(ct->status & IPS_NAT_MASK))
+		return;
+
+	if (memcmp(&target->dst_port, &tuple->dst_port, sizeof(target->dst_port)))
+		fl_add_mangle_action(p, TCA_PEDIT_KEY_EX_HDR_TYPE_UDP,
+				     0,
+				     0xFFFF0000, target->dst_port << 16);
+
+	if (memcmp(&target->src_port, &tuple->src_port, sizeof(target->src_port)))
+		fl_add_mangle_action(p, TCA_PEDIT_KEY_EX_HDR_TYPE_UDP,
+				     0,
+				     0xFFFF, target->src_port);
+}
+
+static void fl_add_ct_nat_ipv4(struct nf_conn *ct,
+			       struct flow_offload_tuple *tuple,
+			       struct flow_offload_tuple *target,
+			       struct tc_pedit_tmp *p)
+{
+	if (!(ct->status & IPS_NAT_MASK))
+		return;
+
+	if (memcmp(&target->dst_v4, &tuple->dst_v4, sizeof(target->dst_v4)))
+		fl_add_mangle_action(p, TCA_PEDIT_KEY_EX_HDR_TYPE_IP4,
+				     offsetof(struct iphdr, daddr),
+				     0xFFFFFFFF, target->dst_v4.s_addr);
+
+	if (memcmp(&target->src_v4, &tuple->src_v4, sizeof(target->src_v4)))
+		fl_add_mangle_action(p, TCA_PEDIT_KEY_EX_HDR_TYPE_IP4,
+				     offsetof(struct iphdr, saddr),
+				     0xFFFFFFFF, target->src_v4.s_addr);
+}
+
+static void
+fl_add_ct_nat_ipv6_addr(struct tc_pedit_tmp *p,
+			struct in6_addr *addr,
+			u32 offset)
+{
+	int i;
+
+	for (i = 0; i < sizeof(struct in6_addr) / sizeof(u32); i++)
+		fl_add_mangle_action(p, TCA_PEDIT_KEY_EX_HDR_TYPE_IP6,
+				     i * sizeof(u32) + offset,
+				     0xFFFFFFFF, addr->in6_u.u6_addr32[i]);
+}
+
+static void fl_add_ct_nat_ipv6(struct nf_conn *ct,
+			       struct flow_offload_tuple *tuple,
+			       struct flow_offload_tuple *target,
+			       struct tc_pedit_tmp *p)
+{
+	if (!(ct->status & IPS_NAT_MASK))
+		return;
+
+	if (memcmp(&target->dst_v6, &tuple->dst_v6, sizeof(target->dst_v6)))
+		fl_add_ct_nat_ipv6_addr(p, &target->dst_v6,
+					offsetof(struct ipv6hdr, daddr));
+
+	if (memcmp(&target->src_v6, &tuple->src_v6, sizeof(target->src_v6)))
+		fl_add_ct_nat_ipv6_addr(p, &target->src_v6,
+					offsetof(struct ipv6hdr, saddr));
+}
+
+static int fl_add_ct_nat(struct tc_pedit_tmp *p,
+			 struct e2e_cache_trace_entry *entry)
+{
+	struct flow_offload_tuple *tuple1, *orig, target;
+	struct nf_conn *ct = entry->flow->ct;
+
+	tuple1 = &entry->flow->tuplehash[entry->dir].tuple;
+	orig = &entry->flow->tuplehash[!entry->dir].tuple;
+	memset(&target, 0, sizeof(target));
+	target.dst_port = orig->src_port;
+	target.src_port = orig->dst_port;
+
+	switch (tuple1->l3proto) {
+	case NFPROTO_IPV4:
+		target.dst_v4 = orig->src_v4;
+		target.src_v4 = orig->dst_v4;
+		fl_add_ct_nat_ipv4(ct, tuple1, &target, p);
+		break;
+	case NFPROTO_IPV6:
+		target.dst_v6 = orig->src_v6;
+		target.src_v6 = orig->dst_v6;
+		fl_add_ct_nat_ipv6(ct, tuple1, &target, p);
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	switch (tuple1->l4proto) {
+	case IPPROTO_TCP:
+		fl_add_ct_nat_tcp(ct, tuple1, &target, p);
+		break;
+	case IPPROTO_UDP:
+		fl_add_ct_nat_udp(ct, tuple1, &target, p);
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
+
+static int fl_add_pedit_to_filter(struct cls_fl_filter *fnew,
+				  struct tcf_proto *tp,
+				  struct net *net,
+				  struct tc_pedit_tmp *p,
+				  struct netlink_ext_ack *extack)
+{
+	struct tcf_pedit_key_ex *keys_ex;
+	struct tc_pedit_key *keys;
+	struct tcf_pedit *p_act;
+	struct tc_action *act;
+	int err;
+
+	act = tcf_action_init_1(net, tp, NULL, NULL, "pedit", false, true, false, extack);
+
+	if (IS_ERR(act) && PTR_ERR(act) == -EAGAIN)
+		act = tcf_action_init_1(net, tp, NULL, NULL, "pedit", false, true, false, extack);
+
+	if (IS_ERR(act))
+		return PTR_ERR(act);
+
+	keys = kcalloc(p->nkeys, sizeof(*keys), GFP_KERNEL);
+	keys_ex = kcalloc(p->nkeys, sizeof(*keys_ex), GFP_KERNEL);
+	if (!keys || !keys_ex) {
+		err = -ENOMEM;
+		goto errout;
+	}
+	memcpy(keys, p->keys, p->nkeys * sizeof(*keys));
+	memcpy(keys_ex, p->keys_ex, p->nkeys * sizeof(*keys_ex));
+
+	p_act = to_pedit(act);
+	p_act->tcf_action = TC_ACT_PIPE;
+	p_act->tcfp_keys = keys;
+	p_act->tcfp_keys_ex = keys_ex;
+	p_act->tcfp_nkeys = p->nkeys;
+
+	fnew->exts.actions[fnew->exts.nr_actions++] = act;
+
+	return 0;
+
+errout:
+	kfree(keys);
+	kfree(keys_ex);
+	tcf_action_destroy_1(act, true);
+
+	return err;
+}
+
 static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 		    void **arg)
 {
@@ -1819,10 +2019,12 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 	struct cls_fl_filter *fnew, *last_f = NULL;
 	struct netlink_ext_ack extack = {};
 	struct flow_offload_tuple *tuple;
+	struct tc_pedit_tmp *p_tmp;
 	struct fl_flow_mask *mask;
 	struct fl_flow_key *mkey;
 	struct tc_action *act;
 	bool skip_hw = false;
+	struct net *net;
 	int err, i;
 
 	if (entry->type != E2E_CACHE_TRACE_CT)
@@ -1834,10 +2036,16 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 	if (!mask)
 		return -ENOMEM;
 
+	p_tmp = kzalloc(sizeof(*p_tmp), GFP_KERNEL);
+	if (!p_tmp) {
+		err = -ENOMEM;
+		goto errout_mask;
+	}
+
 	mkey = kzalloc(sizeof(*mkey), GFP_KERNEL);
 	if (!mkey) {
 		err = -ENOMEM;
-		goto errout_mask;
+		goto errout_pedit;
 	}
 
 	for (i = 0; i < trace->num_entries; i++) {
@@ -1848,14 +2056,9 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 		entry = &trace->entries[i];
 
 		if (entry->type == E2E_CACHE_TRACE_CT) {
-			struct nf_conn *ct = entry->flow->ct;
-
-			if (ct->status & IPS_DST_NAT || ct->status & IPS_SRC_NAT) {
-				err = -EOPNOTSUPP;
+			err = fl_add_ct_nat(p_tmp, entry);
+			if (err)
 				goto errout_mkey;
-			}
-
-			continue;
 		}
 
 		if (entry->type != E2E_CACHE_TRACE_TP)
@@ -1897,7 +2100,8 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 		goto errout_mkey;
 	}
 
-	err = alloc_fnew(last_f->exts.net, &fnew);
+	net = last_f->exts.net;
+	err = alloc_fnew(net, &fnew);
 	if (err)
 		goto errout_mkey;
 
@@ -1918,13 +2122,22 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 		fnew->flags |= TCA_CLS_FLAGS_SKIP_HW;
 
 	/* set actions */
-	fnew->exts.nr_actions = last_f->exts.nr_actions;
+	if (p_tmp->nkeys) {
+		memset(&extack, 0, sizeof(extack));
+		err = fl_add_pedit_to_filter(fnew, tp, net, p_tmp, &extack);
+		if (extack._msg)
+			pr_debug("extack msg: %s\n", extack._msg);
+		if (err)
+			goto errout;
+	}
 
 	/* copy actions */
 	tcf_exts_for_each_action(i, act, &last_f->exts) {
 		tcf_action_get(act);
 		fnew->exts.actions[fnew->exts.nr_actions++] = act;
 	}
+
+	memset(&extack, 0, sizeof(extack));
 
 	err = fl_insert(tp, NULL, fnew, mask, 0, false, &extack);
 	if (extack._msg)
@@ -1934,14 +2147,18 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 
 	*arg = fnew;
 
+	kfree(p_tmp);
 	kfree(mkey);
 	tcf_queue_work(&mask->rwork, fl_uninit_mask_free_work);
+
 	return 0;
 
 errout:
 	__fl_put(fnew);
 errout_mkey:
 	kfree(mkey);
+errout_pedit:
+	kfree(p_tmp);
 errout_mask:
 	tcf_queue_work(&mask->rwork, fl_uninit_mask_free_work);
 

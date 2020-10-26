@@ -65,6 +65,8 @@ struct flow_offload *flow_offload_alloc(struct nf_conn *ct)
 	if (ct->status & IPS_DST_NAT)
 		__set_bit(NF_FLOW_DNAT, &flow->flags);
 
+	refcount_set(&flow->ref, 1);
+
 	return flow;
 
 err_ct_refcnt:
@@ -73,6 +75,19 @@ err_ct_refcnt:
 	return NULL;
 }
 EXPORT_SYMBOL_GPL(flow_offload_alloc);
+
+bool flow_offload_get(struct flow_offload *flow)
+{
+	return refcount_inc_not_zero(&flow->ref);
+}
+EXPORT_SYMBOL_GPL(flow_offload_get);
+
+void flow_offload_put(struct flow_offload *flow)
+{
+	if (refcount_dec_and_test(&flow->ref))
+		__set_bit(NF_FLOW_UNREFERENCED, &flow->flags);
+}
+EXPORT_SYMBOL_GPL(flow_offload_put);
 
 static int flow_offload_fill_route(struct flow_offload *flow,
 				   const struct nf_flow_route *route,
@@ -225,6 +240,8 @@ int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow)
 {
 	int err;
 
+	flow_offload_get(flow);
+
 	flow->timeout = nf_flowtable_time_stamp +
 			nf_flow_offload_timeout(flow_table);
 
@@ -232,16 +249,13 @@ int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow)
 				     &flow->tuplehash[0].node,
 				     nf_flow_offload_rhash_params);
 	if (err < 0)
-		return err;
+		goto err_insert_1;
 
 	err = rhashtable_insert_fast(&flow_table->rhashtable,
 				     &flow->tuplehash[1].node,
 				     nf_flow_offload_rhash_params);
 	if (err < 0) {
-		rhashtable_remove_fast(&flow_table->rhashtable,
-				       &flow->tuplehash[0].node,
-				       nf_flow_offload_rhash_params);
-		return err;
+		goto err_insert_2;
 	}
 
 	nf_ct_offload_timeout(flow->ct);
@@ -252,6 +266,13 @@ int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow)
 	}
 
 	return 0;
+
+err_insert_2:
+	rhashtable_remove_fast(&flow_table->rhashtable, &flow->tuplehash[0].node,
+			       nf_flow_offload_rhash_params);
+err_insert_1:
+	flow_offload_put(flow);
+	return err;
 }
 EXPORT_SYMBOL_GPL(flow_offload_add);
 
@@ -302,28 +323,31 @@ void flow_offload_teardown(struct flow_offload *flow)
 }
 EXPORT_SYMBOL_GPL(flow_offload_teardown);
 
-struct flow_offload_tuple_rhash *
+struct flow_offload *
 flow_offload_lookup(struct nf_flowtable *flow_table,
-		    struct flow_offload_tuple *tuple)
+		    struct flow_offload_tuple *tuple,
+		    enum flow_offload_tuple_dir *dir)
 {
 	struct flow_offload_tuple_rhash *tuplehash;
 	struct flow_offload *flow;
-	int dir;
 
 	tuplehash = rhashtable_lookup(&flow_table->rhashtable, tuple,
 				      nf_flow_offload_rhash_params);
 	if (!tuplehash)
 		return NULL;
 
-	dir = tuplehash->tuple.dir;
-	flow = container_of(tuplehash, struct flow_offload, tuplehash[dir]);
+	*dir = tuplehash->tuple.dir;
+	flow = container_of(tuplehash, struct flow_offload, tuplehash[*dir]);
 	if (test_bit(NF_FLOW_TEARDOWN, &flow->flags))
 		return NULL;
 
 	if (unlikely(nf_ct_is_dying(flow->ct)))
 		return NULL;
 
-	return tuplehash;
+	if (!flow_offload_get(flow))
+		return NULL;
+
+	return flow;
 }
 EXPORT_SYMBOL_GPL(flow_offload_lookup);
 
@@ -364,22 +388,32 @@ nf_flow_table_iterate(struct nf_flowtable *flow_table,
 static void nf_flow_offload_gc_step(struct flow_offload *flow, void *data)
 {
 	struct nf_flowtable *flow_table = data;
+	bool del = false;
 
 	if (nf_flow_has_expired(flow) || nf_ct_is_dying(flow->ct))
 		set_bit(NF_FLOW_TEARDOWN, &flow->flags);
 
 	if (test_bit(NF_FLOW_TEARDOWN, &flow->flags)) {
 		if (test_bit(NF_FLOW_HW, &flow->flags)) {
-			if (!test_bit(NF_FLOW_HW_DYING, &flow->flags))
-				nf_flow_offload_del(flow_table, flow);
-			else if (test_bit(NF_FLOW_HW_DEAD, &flow->flags))
-				flow_offload_del(flow_table, flow);
+			if (!test_bit(NF_FLOW_HW_DYING, &flow->flags)) {
+				if (refcount_read(&flow->ref) == 1)
+					nf_flow_offload_del(flow_table, flow);
+			} else if (test_bit(NF_FLOW_HW_DEAD, &flow->flags)) {
+				del = true;
+			}
+
 		} else {
-			flow_offload_del(flow_table, flow);
+			del = true;
 		}
 	} else if (test_bit(NF_FLOW_HW, &flow->flags)) {
 		nf_flow_offload_stats(flow_table, flow);
 	}
+
+	if (del && !test_and_set_bit(NF_FLOW_DEAD, &flow->flags))
+		flow_offload_put(flow);
+
+	if (test_bit(NF_FLOW_UNREFERENCED, &flow->flags))
+		flow_offload_del(flow_table, flow);
 }
 
 static void nf_flow_offload_work_gc(struct work_struct *work)

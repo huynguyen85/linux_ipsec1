@@ -374,6 +374,8 @@ static void tcf_ct_flow_table_add(struct tcf_ct_flow_table *ct_ft,
 
 	dir = (ctinfo == IP_CT_IS_REPLY ? FLOW_OFFLOAD_DIR_REPLY : FLOW_OFFLOAD_DIR_ORIGINAL);
 	e2e_cache_trace_ct(&ct_ft->nf_ft, entry, dir);
+	flow_offload_put(entry);
+
 	return;
 
 err_add:
@@ -503,13 +505,12 @@ static bool tcf_ct_flow_table_lookup(struct tcf_ct_params *p,
 				     u8 family)
 {
 	struct nf_flowtable *nf_ft = &p->ct_ft->nf_ft;
-	struct flow_offload_tuple_rhash *tuplehash;
 	struct flow_offload_tuple tuple = {};
+	enum flow_offload_tuple_dir dir;
 	enum ip_conntrack_info ctinfo;
 	struct tcphdr *tcph = NULL;
 	struct flow_offload *flow;
 	struct nf_conn *ct;
-	u8 dir;
 
 	/* Previously seen or loopback */
 	ct = nf_ct_get(skb, &ctinfo);
@@ -529,16 +530,15 @@ static bool tcf_ct_flow_table_lookup(struct tcf_ct_params *p,
 		return false;
 	}
 
-	tuplehash = flow_offload_lookup(nf_ft, &tuple);
-	if (!tuplehash)
+	flow = flow_offload_lookup(nf_ft, &tuple, &dir);
+	if (!flow)
 		return false;
 
-	dir = tuplehash->tuple.dir;
-	flow = container_of(tuplehash, struct flow_offload, tuplehash[dir]);
 	ct = flow->ct;
 
 	if (tcph && (unlikely(tcph->fin || tcph->rst))) {
 		flow_offload_teardown(flow);
+		flow_offload_put(flow);
 		return false;
 	}
 
@@ -550,6 +550,7 @@ static bool tcf_ct_flow_table_lookup(struct tcf_ct_params *p,
 	nf_ct_set(skb, ct, ctinfo);
 
 	e2e_cache_trace_ct(nf_ft, flow, dir);
+	flow_offload_put(flow);
 
 	return true;
 }

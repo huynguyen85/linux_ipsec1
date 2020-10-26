@@ -487,6 +487,15 @@ static void e2e_cache_trace_release(struct e2e_cache_trace *trace)
 {
 	int i;
 
+	/* For correct nf flow table core gc cleanup, release CT trace entries first.
+	 * TP entries indirectly holds nf flow table which might be freed on last tcf_proto_put()
+	 * and we want to release all our flow offload refs before last gc step is run.
+	 */
+	for (i = 0; i < trace->num_entries; i++) {
+		if (trace->entries[i].type == E2E_CACHE_TRACE_CT)
+			flow_offload_put(trace->entries[i].flow);
+	}
+
 	if (trace->tcf_e2e_cache)
 		e2e_cache_put(trace->tcf_e2e_cache);
 
@@ -846,8 +855,12 @@ e2e_cache_trace_ct_impl(struct nf_flowtable *nf_ft, struct flow_offload *flow, i
 	/* This can happen if one filter has several CT actions */
 	if (trace->num_entries == E2E_CACHE_MAX_TRACE_ENTRIES) {
 		pr_debug("trace=0x%p\n", trace);
-		trace->flags &= ~E2E_CACHE_TRACE_CACHEABLE;
-		return;
+		goto not_cacheable;
+	}
+
+	if (!flow_offload_get(flow)) {
+		pr_debug("trace=0x%p - can't take ct flow\n", trace);
+		goto not_cacheable;
 	}
 
 	trace->entries[trace->num_entries].type = E2E_CACHE_TRACE_CT;
@@ -859,6 +872,10 @@ e2e_cache_trace_ct_impl(struct nf_flowtable *nf_ft, struct flow_offload *flow, i
 	trace->num_conns++;
 	pr_debug("trace=0x%p flow=0x%p dir=%d num_conns=%d\n", trace
 						             , flow, dir, trace->num_conns);
+	return;
+
+not_cacheable:
+	trace->flags &= ~E2E_CACHE_TRACE_CACHEABLE;
 }
 
 static void

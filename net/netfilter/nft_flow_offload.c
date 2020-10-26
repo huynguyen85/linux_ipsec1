@@ -132,6 +132,7 @@ static void nft_flow_offload_eval(const struct nft_expr *expr,
 		goto err_flow_add;
 
 	dst_release(route.tuple[!dir].dst);
+	flow_offload_put(flow);
 	return;
 
 err_flow_add:

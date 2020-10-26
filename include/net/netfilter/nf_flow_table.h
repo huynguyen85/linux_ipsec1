@@ -123,6 +123,8 @@ enum nf_flow_flags {
 	NF_FLOW_SNAT,
 	NF_FLOW_DNAT,
 	NF_FLOW_TEARDOWN,
+	NF_FLOW_UNREFERENCED,
+	NF_FLOW_DEAD,
 	NF_FLOW_HW,
 	NF_FLOW_HW_DYING,
 	NF_FLOW_HW_DEAD,
@@ -142,6 +144,7 @@ struct flow_offload {
 	u16					type;
 	u32					timeout;
 	struct rcu_head				rcu_head;
+	refcount_t				ref;
 };
 
 #define NF_DEFAULT_FLOW_TIMEOUT (30 * HZ)
@@ -165,6 +168,8 @@ struct nf_flow_route {
 
 struct flow_offload *flow_offload_alloc(struct nf_conn *ct);
 void flow_offload_free(struct flow_offload *flow);
+bool flow_offload_get(struct flow_offload *flow);
+void flow_offload_put(struct flow_offload *flow);
 
 static inline int
 nf_flow_table_offload_add_cb(struct nf_flowtable *flow_table,
@@ -219,8 +224,9 @@ int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow)
 void flow_offload_refresh(struct nf_flowtable *flow_table,
 			  struct flow_offload *flow);
 
-struct flow_offload_tuple_rhash *flow_offload_lookup(struct nf_flowtable *flow_table,
-						     struct flow_offload_tuple *tuple);
+struct flow_offload *flow_offload_lookup(struct nf_flowtable *flow_table,
+					 struct flow_offload_tuple *tuple,
+					 enum flow_offload_tuple_dir *dir);
 void nf_flow_table_cleanup(struct net_device *dev);
 
 int nf_flow_table_init(struct nf_flowtable *flow_table);

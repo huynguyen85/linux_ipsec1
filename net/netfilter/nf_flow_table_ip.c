@@ -239,12 +239,12 @@ unsigned int
 nf_flow_offload_ip_hook(void *priv, struct sk_buff *skb,
 			const struct nf_hook_state *state)
 {
-	struct flow_offload_tuple_rhash *tuplehash;
 	struct nf_flowtable *flow_table = priv;
 	struct flow_offload_tuple tuple = {};
 	enum flow_offload_tuple_dir dir;
 	struct flow_offload *flow;
 	struct net_device *outdev;
+	int ret = NF_ACCEPT;
 	struct rtable *rt;
 	unsigned int thoff;
 	struct iphdr *iph;
@@ -256,34 +256,36 @@ nf_flow_offload_ip_hook(void *priv, struct sk_buff *skb,
 	if (nf_flow_tuple_ip(skb, state->in, &tuple) < 0)
 		return NF_ACCEPT;
 
-	tuplehash = flow_offload_lookup(flow_table, &tuple);
-	if (tuplehash == NULL)
+	flow = flow_offload_lookup(flow_table, &tuple, &dir);
+	if (flow == NULL)
 		return NF_ACCEPT;
 
-	dir = tuplehash->tuple.dir;
-	flow = container_of(tuplehash, struct flow_offload, tuplehash[dir]);
 	rt = (struct rtable *)flow->tuplehash[dir].tuple.dst_cache;
 	outdev = rt->dst.dev;
 
 	if (unlikely(nf_flow_exceeds_mtu(skb, flow->tuplehash[dir].tuple.mtu)))
-		return NF_ACCEPT;
+		goto out_put;
 
-	if (skb_try_make_writable(skb, sizeof(*iph)))
-		return NF_DROP;
+	if (skb_try_make_writable(skb, sizeof(*iph))) {
+		ret = NF_DROP;
+		goto out_put;
+	}
 
 	thoff = ip_hdr(skb)->ihl * 4;
 	if (nf_flow_state_check(flow, ip_hdr(skb)->protocol, skb, thoff))
-		return NF_ACCEPT;
+		goto out_put;
 
 	flow_offload_refresh(flow_table, flow);
 
 	if (nf_flow_offload_dst_check(&rt->dst)) {
 		flow_offload_teardown(flow);
-		return NF_ACCEPT;
+		goto out_put;
 	}
 
-	if (nf_flow_nat_ip(flow, skb, thoff, dir) < 0)
-		return NF_DROP;
+	if (nf_flow_nat_ip(flow, skb, thoff, dir) < 0) {
+		ret = NF_DROP;
+		goto out_put;
+	}
 
 	iph = ip_hdr(skb);
 	ip_decrease_ttl(iph);
@@ -293,7 +295,8 @@ nf_flow_offload_ip_hook(void *priv, struct sk_buff *skb,
 		memset(skb->cb, 0, sizeof(struct inet_skb_parm));
 		IPCB(skb)->iif = skb->dev->ifindex;
 		IPCB(skb)->flags = IPSKB_FORWARDED;
-		return nf_flow_xmit_xfrm(skb, state, &rt->dst);
+		ret = nf_flow_xmit_xfrm(skb, state, &rt->dst);
+		goto out_put;
 	}
 
 	skb->dev = outdev;
@@ -301,7 +304,10 @@ nf_flow_offload_ip_hook(void *priv, struct sk_buff *skb,
 	skb_dst_set_noref(skb, &rt->dst);
 	neigh_xmit(NEIGH_ARP_TABLE, outdev, &nexthop, skb);
 
-	return NF_STOLEN;
+	ret = NF_STOLEN;
+out_put:
+	flow_offload_put(flow);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(nf_flow_offload_ip_hook);
 
@@ -473,7 +479,6 @@ unsigned int
 nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 			  const struct nf_hook_state *state)
 {
-	struct flow_offload_tuple_rhash *tuplehash;
 	struct nf_flowtable *flow_table = priv;
 	struct flow_offload_tuple tuple = {};
 	enum flow_offload_tuple_dir dir;
@@ -482,6 +487,7 @@ nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 	struct net_device *outdev;
 	struct ipv6hdr *ip6h;
 	struct rt6_info *rt;
+	int ret = NF_ACCEPT;
 
 	if (skb->protocol != htons(ETH_P_IPV6))
 		return NF_ACCEPT;
@@ -489,34 +495,36 @@ nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 	if (nf_flow_tuple_ipv6(skb, state->in, &tuple) < 0)
 		return NF_ACCEPT;
 
-	tuplehash = flow_offload_lookup(flow_table, &tuple);
-	if (tuplehash == NULL)
+	flow = flow_offload_lookup(flow_table, &tuple, &dir);
+	if (flow == NULL)
 		return NF_ACCEPT;
 
-	dir = tuplehash->tuple.dir;
-	flow = container_of(tuplehash, struct flow_offload, tuplehash[dir]);
 	rt = (struct rt6_info *)flow->tuplehash[dir].tuple.dst_cache;
 	outdev = rt->dst.dev;
 
 	if (unlikely(nf_flow_exceeds_mtu(skb, flow->tuplehash[dir].tuple.mtu)))
-		return NF_ACCEPT;
+		goto out_put;
 
 	if (nf_flow_state_check(flow, ipv6_hdr(skb)->nexthdr, skb,
 				sizeof(*ip6h)))
-		return NF_ACCEPT;
+		goto out_put;
 
 	flow_offload_refresh(flow_table, flow);
 
 	if (nf_flow_offload_dst_check(&rt->dst)) {
 		flow_offload_teardown(flow);
-		return NF_ACCEPT;
+		goto out_put;
 	}
 
-	if (skb_try_make_writable(skb, sizeof(*ip6h)))
-		return NF_DROP;
+	if (skb_try_make_writable(skb, sizeof(*ip6h))) {
+		ret = NF_DROP;
+		goto out_put;
+	}
 
-	if (nf_flow_nat_ipv6(flow, skb, dir) < 0)
-		return NF_DROP;
+	if (nf_flow_nat_ipv6(flow, skb, dir) < 0) {
+		ret = NF_DROP;
+		goto out_put;
+	}
 
 	ip6h = ipv6_hdr(skb);
 	ip6h->hop_limit--;
@@ -526,7 +534,8 @@ nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 		memset(skb->cb, 0, sizeof(struct inet6_skb_parm));
 		IP6CB(skb)->iif = skb->dev->ifindex;
 		IP6CB(skb)->flags = IP6SKB_FORWARDED;
-		return nf_flow_xmit_xfrm(skb, state, &rt->dst);
+		ret = nf_flow_xmit_xfrm(skb, state, &rt->dst);
+		goto out_put;
 	}
 
 	skb->dev = outdev;
@@ -534,6 +543,9 @@ nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 	skb_dst_set_noref(skb, &rt->dst);
 	neigh_xmit(NEIGH_ND_TABLE, outdev, nexthop, skb);
 
-	return NF_STOLEN;
+	ret = NF_STOLEN;
+out_put:
+	flow_offload_put(flow);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(nf_flow_offload_ipv6_hook);

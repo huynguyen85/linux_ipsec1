@@ -36,7 +36,8 @@ struct e2e_cache_trace_data {
 };
 
 struct e2e_cache_ops {
-	struct tcf_e2e_cache*	(*create)(struct tcf_chain *tcf_e2e_chain);
+	struct tcf_e2e_cache*	(*create)(struct tcf_chain *tcf_e2e_chain,
+					  struct tcf_proto *tp);
 	void			(*destroy)(struct tcf_e2e_cache *tcf_e2e_cache);
 	void			(*trace_begin)(struct tcf_e2e_cache *tcf_e2e_cache,
 					       struct sk_buff *skb);
@@ -58,7 +59,8 @@ struct e2e_cache_ops {
 void e2e_cache_register_ops(struct e2e_cache_ops *e2e_cache_ops);
 void e2e_cache_unregister_ops(void);
 
-struct tcf_e2e_cache *e2e_cache_create(struct tcf_chain *tcf_e2e_chain);
+struct tcf_e2e_cache *e2e_cache_create(struct tcf_chain *tcf_e2e_chain,
+				       struct tcf_proto *tp);
 void e2e_cache_destroy(struct tcf_e2e_cache *tcf_e2e_cache);
 
 void e2e_cache_trace_begin(struct tcf_e2e_cache *tcf_e2e_cache, struct sk_buff *skb);

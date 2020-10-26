@@ -17,14 +17,15 @@ void e2e_cache_unregister_ops(void)
 }
 EXPORT_SYMBOL(e2e_cache_unregister_ops);
 
-struct tcf_e2e_cache *e2e_cache_create(struct tcf_chain *tcf_e2e_chain)
+struct tcf_e2e_cache *e2e_cache_create(struct tcf_chain *tcf_e2e_chain,
+				       struct tcf_proto *tp)
 {
 	request_module("e2e-cache");
 
 	if (!ops)
 		return NULL;
 
-	return ops->create(tcf_e2e_chain);
+	return ops->create(tcf_e2e_chain, tp);
 }
 
 void e2e_cache_destroy(struct tcf_e2e_cache *tcf_e2e_cache)

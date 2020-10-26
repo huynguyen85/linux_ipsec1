@@ -3800,6 +3800,7 @@ int tcf_block_create_e2e_cache(struct tcf_block *block)
 {
 	struct tcf_e2e_cache *tcf_e2e_cache;
 	struct tcf_chain *chain;
+	struct tcf_proto *tp;
 	int err;
 
 	mutex_lock(&block->lock);
@@ -3809,25 +3810,45 @@ int tcf_block_create_e2e_cache(struct tcf_block *block)
 	if (!chain)
 		return -ENOMEM;
 
-	tcf_e2e_cache = e2e_cache_create(chain);
-	if (IS_ERR(tcf_e2e_cache))
+err_eagain:
+	tp = tcf_proto_create_and_insert("flower", ETH_P_ALL, 1 << 16, chain);
+	if (IS_ERR(tp)) {
+		if (PTR_ERR(tp) == -EAGAIN) /* first user, module was loaded */
+			goto err_eagain;
+		tcf_chain_put(chain);
+		return PTR_ERR(tp);
+	}
+
+	tcf_e2e_cache = e2e_cache_create(chain, tp);
+	if (IS_ERR(tcf_e2e_cache)) {
+		err = PTR_ERR(tcf_e2e_cache);
 		goto err_create;
+	}
 
 	block->tcf_e2e_cache = tcf_e2e_cache;
 	block->tcf_e2e_chain = chain;
+	block->tcf_e2e_tp = tp;
 
 	return 0;
 
 err_create:
-	tcf_chain_put(block->tcf_e2e_chain);
+	tcf_chain_tp_delete_empty(chain, tp);
+	tcf_proto_put(tp, true, NULL);
 	return err;
 }
 EXPORT_SYMBOL(tcf_block_create_e2e_cache);
 
 void tcf_block_destroy_e2e_cache(struct tcf_block *block)
 {
+	if (!block || !block->tcf_e2e_cache)
+		return;
+
 	e2e_cache_destroy(block->tcf_e2e_cache);
 	block->tcf_e2e_cache = NULL;
+
+	tcf_chain_tp_delete_empty(block->tcf_e2e_chain, block->tcf_e2e_tp);
+	tcf_proto_put(block->tcf_e2e_tp, true, NULL);
+	block->tcf_e2e_tp = NULL;
 
 	tcf_chain_flush(block->tcf_e2e_chain, true);
 	tcf_chain_put(block->tcf_e2e_chain);

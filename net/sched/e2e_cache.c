@@ -211,14 +211,6 @@ e2e_cache_unmark_tracing(u32 hash)
 	clear_bit(hash, e2e_tracing_bm);
 }
 
-static void
-e2e_cache_destroy_tp(struct tcf_e2e_cache *tcf_e2e_cache)
-{
-	tcf_chain_tp_delete_empty(tcf_e2e_cache->tcf_e2e_chain, tcf_e2e_cache->tp);
-	tcf_proto_put(tcf_e2e_cache->tp, true, NULL);
-	tcf_e2e_cache->tp = NULL;
-}
-
 static void e2e_cache_trace_release(struct e2e_cache_trace *trace)
 {
 	int i;
@@ -246,25 +238,10 @@ static void e2e_cache_trace_process_work(struct work_struct *work)
 	struct tcf_e2e_cache *tcf_e2e_cache = trace->tcf_e2e_cache;
 	struct e2e_cache_trace_data trace_data;
 	struct e2e_cache_entry *merged_entry;
-	bool tp_created = false;
 	void *merged_fh;
 	int err;
 
 	pr_debug("process work\n");
-
-	if (!tcf_e2e_cache->tp) {
-		struct tcf_proto *tp;
-
-		tp = tcf_proto_create_and_insert(trace->ops->kind, ETH_P_ALL , 1 << 16,
-						 tcf_e2e_cache->tcf_e2e_chain);
-		if (IS_ERR(tp))
-			goto err_out;
-
-		pr_debug("created %s tp for proto 0x%x\n", trace->ops->kind
-							 , trace->protocol);
-		tcf_e2e_cache->tp = tp;
-		tp_created = true;
-	}
 
 	/* Only room for one tp kind for now */
 	if (tcf_e2e_cache->tp->ops != trace->ops)
@@ -295,8 +272,6 @@ static void e2e_cache_trace_process_work(struct work_struct *work)
 	return;
 
 err_out:
-	if (tp_created)
-		tcf_proto_put(tcf_e2e_cache->tp, true, NULL);
 	e2e_cache_trace_release(trace);
 }
 
@@ -477,8 +452,6 @@ e2e_cache_entry_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_ent
 	/* for now we only have one entry so no need to check last */
 	kfree(tcf_e2e_cache->entry);
 	tcf_e2e_cache->entry = NULL;
-
-	e2e_cache_destroy_tp(tcf_e2e_cache);
 }
 
 static void
@@ -592,7 +565,8 @@ e2e_cache_filter_update_stats_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 }
 
 static struct tcf_e2e_cache *
-e2e_cache_create_impl(struct tcf_chain *tcf_e2e_chain)
+e2e_cache_create_impl(struct tcf_chain *tcf_e2e_chain,
+		      struct tcf_proto *tp)
 {
 	struct tcf_e2e_cache *tcf_e2e_cache;
 
@@ -603,7 +577,8 @@ e2e_cache_create_impl(struct tcf_chain *tcf_e2e_chain)
 	__module_get(THIS_MODULE);
 
 	tcf_e2e_cache->tcf_e2e_chain = tcf_e2e_chain;
-	pr_debug("chain=0x%p\n", tcf_e2e_chain);
+	tcf_e2e_cache->tp = tp;
+	pr_debug("chain=0x%p tp=0x%p\n", tcf_e2e_chain, tp);
 
 	return tcf_e2e_cache;
 }

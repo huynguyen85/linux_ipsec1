@@ -447,6 +447,7 @@ struct tcf_block {
 
 	struct tcf_e2e_cache *tcf_e2e_cache;
 	struct tcf_chain *tcf_e2e_chain;
+	struct tcf_proto *tcf_e2e_tp;
 };
 
 #ifdef CONFIG_PROVE_LOCKING

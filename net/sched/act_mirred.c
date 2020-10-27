@@ -207,6 +207,33 @@ release_idr:
 	return err;
 }
 
+static int tcf_mirred_clone(struct tc_action *new, struct tc_action *orig)
+{
+	struct tcf_mirred *mo = to_mirred(orig), *m;
+	struct net_device *orig_dev;
+
+	spin_lock_bh(&mo->tcf_lock);
+	orig_dev = tcf_mirred_dev_dereference(mo);
+	if (orig_dev)
+		dev_hold(orig_dev);
+	spin_unlock_bh(&mo->tcf_lock);
+
+	m = to_mirred(new);
+
+	INIT_LIST_HEAD(&m->tcfm_list);
+	spin_lock_bh(&m->tcf_lock);
+	m->tcfm_mac_header_xmit = mo->tcfm_mac_header_xmit;
+	rcu_swap_protected(m->tcfm_dev, orig_dev, lockdep_is_held(&m->tcf_lock));
+	m->tcfm_eaction = mo->tcfm_eaction;
+	spin_unlock_bh(&m->tcf_lock);
+
+	spin_lock(&mirred_list_lock);
+	list_add(&m->tcfm_list, &mirred_list);
+	spin_unlock(&mirred_list_lock);
+
+	return 0;
+}
+
 static int tcf_mirred_act(struct sk_buff *skb, const struct tc_action *a,
 			  struct tcf_result *res)
 {
@@ -444,11 +471,13 @@ static struct tc_action_ops act_mirred_ops = {
 	.dump		=	tcf_mirred_dump,
 	.cleanup	=	tcf_mirred_release,
 	.init		=	tcf_mirred_init,
+	.clone		=	tcf_mirred_clone,
 	.walk		=	tcf_mirred_walker,
 	.lookup		=	tcf_mirred_search,
 	.get_fill_size	=	tcf_mirred_get_fill_size,
 	.size		=	sizeof(struct tcf_mirred),
 	.get_dev	=	tcf_mirred_get_dev,
+	.pernet_id	=	&mirred_net_id,
 };
 
 static __net_init int mirred_init_net(struct net *net)

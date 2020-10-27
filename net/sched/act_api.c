@@ -999,6 +999,63 @@ err_out:
 }
 EXPORT_SYMBOL(tcf_action_init_1);
 
+struct tc_action *tcf_action_clone(struct net *net, struct tcf_proto *tp, struct tc_action *orig)
+{
+	struct tcf_chain *goto_ch = NULL;
+	struct tc_action_net *tn;
+	struct tc_action *new;
+	bool created = false;
+	int index = 0, err;
+
+	if (!orig->ops->clone || !orig->ops->pernet_id)
+		return ERR_PTR(-EOPNOTSUPP);
+
+	if (!try_module_get(orig->ops->owner))
+		return ERR_PTR(-ENOENT);
+
+	tn = net_generic(net, *(orig->ops->pernet_id));
+	err = tcf_idr_check_alloc(tn, &index, &new, 0);
+	if (err < 0)
+		goto err_check;
+
+	err = tcf_action_check_ctrlact(orig->tcfa_action, tp, &goto_ch, NULL);
+	if (err)
+		goto err_check_ctrl;
+
+	err = tcf_idr_create_from_flags(tn, index, NULL, &new, orig->ops, 0, orig->tcfa_flags);
+	if (err)
+		goto err_create;
+	created = true;
+
+	spin_lock_bh(&new->tcfa_lock);
+	goto_ch = tcf_action_set_ctrlact(new, orig->tcfa_action, goto_ch);
+	if (goto_ch) {
+		tcf_chain_put_by_act(goto_ch);
+		goto_ch = NULL;
+	}
+	spin_unlock_bh(&new->tcfa_lock);
+
+	err = orig->ops->clone(new, orig);
+	if (err < 0)
+		goto err_clone;
+
+	tcf_idr_insert(tn, new);
+	return new;
+
+err_clone:
+	tcf_idr_release(new, 0);
+err_create:
+	if (!created)
+		tcf_idr_cleanup(tn, index);
+err_check_ctrl:
+	if (goto_ch)
+		tcf_chain_put_by_act(goto_ch);
+err_check:
+	module_put(orig->ops->owner);
+	return ERR_PTR(err);
+}
+EXPORT_SYMBOL(tcf_action_clone);
+
 /* Returns numbers of initialized actions or negative error. */
 
 int tcf_action_init(struct net *net, struct tcf_proto *tp, struct nlattr *nla,

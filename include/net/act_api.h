@@ -97,6 +97,7 @@ struct tc_action_ops {
 			struct nlattr *est, struct tc_action **act, int ovr,
 			int bind, bool rtnl_held, struct tcf_proto *tp,
 			u32 flags, struct netlink_ext_ack *extack);
+	int	(*clone)(struct tc_action *new, struct tc_action *orig);
 	int     (*walk)(struct net *, struct sk_buff *,
 			struct netlink_callback *, int,
 			const struct tc_action_ops *,
@@ -108,6 +109,7 @@ struct tc_action_ops {
 	struct psample_group *
 	(*get_psample_group)(const struct tc_action *a,
 			     tc_action_priv_destructor *destructor);
+	int *pernet_id;
 };
 
 struct tc_action_net {
@@ -189,6 +191,7 @@ struct tc_action *tcf_action_init_1(struct net *net, struct tcf_proto *tp,
 				    char *name, int ovr, int bind,
 				    bool rtnl_held,
 				    struct netlink_ext_ack *extack);
+struct tc_action *tcf_action_clone(struct net *net, struct tcf_proto *tp, struct tc_action *orig);
 int tcf_action_dump(struct sk_buff *skb, struct tc_action *actions[], int bind,
 		    int ref);
 int tcf_action_dump_old(struct sk_buff *skb, struct tc_action *a, int, int);

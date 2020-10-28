@@ -31,6 +31,8 @@
 #define PKA_DEVICE_ACPIHID      "MLNXBF10"
 #define PKA_RING_DEVICE_ACPIHID "MLNXBF11"
 
+#define PKA_DEVICE_ACCESS_MODE  0666
+
 static DEFINE_MUTEX(pka_drv_lock);
 
 static uint32_t pka_device_cnt;
@@ -625,6 +627,8 @@ static struct pka_ring_device *pka_drv_del_ring_device(struct device *dev)
 
 static char *pka_drv_devnode(struct device *dev, umode_t *mode)
 {
+        if (mode != NULL)
+            *mode = PKA_DEVICE_ACCESS_MODE;
 	return kasprintf(GFP_KERNEL, "pka/%s", dev_name(dev));
 }
 

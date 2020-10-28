@@ -2133,8 +2133,19 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 
 	/* copy actions */
 	tcf_exts_for_each_action(i, act, &last_f->exts) {
-		tcf_action_get(act, true);
-		fnew->exts.actions[fnew->exts.nr_actions++] = act;
+		struct tc_action *clone;
+
+		if (is_tcf_pedit(act))
+			continue;
+
+		clone = tcf_action_clone(net, tp, act);
+		if (IS_ERR(clone)) {
+			err = PTR_ERR(clone);
+			pr_debug("clone action %d failed, err %d", act->ops->id, err);
+			goto errout;
+		}
+
+		fnew->exts.actions[fnew->exts.nr_actions++] = clone;
 	}
 
 	memset(&extack, 0, sizeof(extack));

@@ -2012,6 +2012,69 @@ errout:
 	return err;
 }
 
+static int fl_set_pedit_action(struct tc_pedit_tmp *p,
+			       int index,
+			       enum pedit_cmd cmd,
+			       enum pedit_header_type htype,
+			       u32 offset, u32 mask, u32 val)
+{
+	struct tc_pedit_key *key = &p->keys[index];
+	struct tcf_pedit_key_ex *key_ex = &p->keys_ex[index];
+
+	if (index >= MAX_PEDIT_OFFSETS)
+		return -EINVAL;
+
+	key_ex->cmd = cmd;
+	key_ex->htype = htype;
+	key->off = offset;
+	key->mask = ~mask;
+	key->val = val;
+
+	return 0;
+}
+
+static int fl_merge_pedit(struct tc_pedit_tmp *p, struct tc_action *act)
+{
+	enum pedit_header_type htype;
+	enum pedit_cmd cmd;
+	u32 offset;
+	u32 mask;
+	u32 val;
+	int k, i;
+
+	for (k = 0; k < tcf_pedit_nkeys(act); k++) {
+		int replace = false;
+
+		cmd = tcf_pedit_cmd(act, k);
+		htype = tcf_pedit_htype(act, k);
+		mask = tcf_pedit_mask(act, k);
+		val = tcf_pedit_val(act, k);
+		offset = tcf_pedit_offset(act, k);
+
+		for (i = 0; i < p->nkeys; i++) {
+			struct tc_pedit_key *key = &p->keys[i];
+			struct tcf_pedit_key_ex *key_ex = &p->keys_ex[i];
+
+			if (key_ex->cmd == cmd && key_ex->htype == htype && key->off == offset) {
+				fl_set_pedit_action(p, i, cmd, htype, offset, ~mask, val);
+				replace = true;
+				break;
+			}
+		}
+
+		if (replace)
+			continue;
+
+		if (k >= MAX_PEDIT_OFFSETS)
+			return -ENOSPC;
+
+		fl_set_pedit_action(p, p->nkeys, cmd, htype, offset, ~mask, val);
+		p->nkeys++;
+	}
+
+	return 0;
+}
+
 static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 		    void **arg)
 {
@@ -2071,8 +2134,9 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 
 		tcf_exts_for_each_action(j, act, &f->exts) {
 			if (is_tcf_pedit(act)) {
-				err = -EOPNOTSUPP;
-				goto errout_mkey;
+				err = fl_merge_pedit(p_tmp, act);
+				if (err)
+					goto errout_mkey;
 			}
 		}
 

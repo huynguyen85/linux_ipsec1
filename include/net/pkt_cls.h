@@ -29,8 +29,10 @@ struct tcf_block_ext_info {
 	enum flow_block_binder_type binder_type;
 	tcf_chain_head_change_t *chain_head_change;
 	void *chain_head_change_priv;
-	u32 block_index;
+	u64 block_index;
 };
+
+#define TCF_BLOCK_E2E_CACHE U64_MAX
 
 struct tcf_block_cb;
 bool tcf_queue_work(struct rcu_work *rwork, work_func_t func);

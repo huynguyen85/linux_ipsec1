@@ -425,7 +425,7 @@ struct tcf_block {
 	 */
 	struct mutex lock;
 	struct list_head chain_list;
-	u32 index; /* block index for shared blocks */
+	u64 index; /* block index for shared blocks */
 	u32 classid; /* which class this block belongs to */
 	refcount_t refcnt;
 	struct net *net;

@@ -907,12 +907,16 @@ static int tcf_block_insert(struct tcf_block *block, struct net *net,
 			    struct netlink_ext_ack *extack)
 {
 	struct tcf_net *tn = net_generic(net, tcf_net_id);
+	u32 index = (u32)block->index;
 	int err;
+
+	/* e2e cache block are not stored in idr */
+	if (block->index == TCF_BLOCK_E2E_CACHE)
+		return 0;
 
 	idr_preload(GFP_KERNEL);
 	spin_lock(&tn->idr_lock);
-	err = idr_alloc_u32(&tn->idr, block, &block->index, block->index,
-			    GFP_NOWAIT);
+	err = idr_alloc_u32(&tn->idr, block, &index, index, GFP_NOWAIT);
 	spin_unlock(&tn->idr_lock);
 	idr_preload_end();
 
@@ -923,13 +927,17 @@ static void tcf_block_remove(struct tcf_block *block, struct net *net)
 {
 	struct tcf_net *tn = net_generic(net, tcf_net_id);
 
+	/* e2e cache block are not stored in idr */
+	if (block->index == TCF_BLOCK_E2E_CACHE)
+		return;
+
 	spin_lock(&tn->idr_lock);
 	idr_remove(&tn->idr, block->index);
 	spin_unlock(&tn->idr_lock);
 }
 
 static struct tcf_block *tcf_block_create(struct net *net, struct Qdisc *q,
-					  u32 block_index,
+					  u64 block_index,
 					  struct netlink_ext_ack *extack)
 {
 	struct tcf_block *block;
@@ -964,12 +972,16 @@ static struct tcf_block *tcf_block_lookup(struct net *net, u32 block_index)
 	return idr_find(&tn->idr, block_index);
 }
 
-static struct tcf_block *tcf_block_refcnt_get(struct net *net, u32 block_index)
+static struct tcf_block *tcf_block_refcnt_get(struct net *net, u64 block_index)
 {
 	struct tcf_block *block;
 
+	/* e2e cache block are not stored in idr */
+	if (block_index == TCF_BLOCK_E2E_CACHE)
+		return NULL;
+
 	rcu_read_lock();
-	block = tcf_block_lookup(net, block_index);
+	block = tcf_block_lookup(net, (u32)block_index);
 	if (block && !refcount_inc_not_zero(&block->refcnt))
 		block = NULL;
 	rcu_read_unlock();
@@ -1649,7 +1661,7 @@ reclassify:
 reset:
 	if (unlikely(limit++ >= TCF_MAX_RECLASSIFY_LOOP)) {
 		net_notice_ratelimited("%u: reclassify loop, rule prio %u, protocol %02x\n",
-				       tp->chain->block->index,
+				       (u32)tp->chain->block->index,
 				       tp->prio & 0xffff,
 				       ntohs(tp->protocol));
 		return TC_ACT_SHOT;
@@ -1943,7 +1955,7 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 		tcm->tcm_parent = parent;
 	} else {
 		tcm->tcm_ifindex = TCM_IFINDEX_MAGIC_BLOCK;
-		tcm->tcm_block_index = block->index;
+		tcm->tcm_block_index = (u32)block->index;
 	}
 	tcm->tcm_info = TC_H_MAKE(tp->prio, tp->protocol);
 
@@ -2821,7 +2833,7 @@ static int tc_chain_fill_node(const struct tcf_proto_ops *tmplt_ops,
 		tcm->tcm_parent = block->q->handle;
 	} else {
 		tcm->tcm_ifindex = TCM_IFINDEX_MAGIC_BLOCK;
-		tcm->tcm_block_index = block->index;
+		tcm->tcm_block_index = (u32)block->index;
 	}
 
 	if (nla_put_u32(skb, TCA_CHAIN, chain_index))

@@ -183,6 +183,29 @@ User command examples:
       values:
          cmode driverinit value true
 
+esw_port_metadata: Eswitch port metadata state
+----------------------------------------------
+Eswitch port metadata state controls whether to internally tag packet with metadata or not.
+Metadata tagging must be enabled for multi-port RoCE, failover between representors and stacked devices.
+By default metadata is enabled on the supported devices. When metadata usage is not needed,
+user can disable metadata tagging before moving the eswitch to switchdev mode.
+
+- Show eswitch port metadata::
+
+    $ devlink dev param show pci/0000:06:00.0 name esw_port_metadata
+      pci/0000:06:00.0:
+        name esw_port_metadata type driver-specific
+          values:
+            cmode runtime value true
+
+- Disable eswitch port metadata::
+
+    $ devlink dev param set pci/0000:06:00.0 name esw_port_metadata value false cmode runtime
+
+- Change eswitch mode to switchdev mode where metadata is used::
+
+    $ devlink dev eswitch set pci/0000:06:00.0 mode switchdev
+
 mlx5 subfunction
 ================
 mlx5 supports subfunctions management using devlink port (see :ref:`Documentation/networking/devlink/devlink-port.rst <devlink_port>`) interface.

@@ -244,8 +244,13 @@ static inline void tcf_action_stats_update(struct tc_action *a, u64 bytes,
 					   u64 packets, u64 lastuse, bool hw)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	if (!a->ops->stats_update)
+	if (!a->ops->stats_update) {
+		struct tcf_t *tm = &a->tcfa_tm;
+
+		tcf_action_update_stats(a, bytes, packets, false, hw);
+		tm->lastuse = max_t(u64, tm->lastuse, lastuse);
 		return;
+	}
 
 	a->ops->stats_update(a, bytes, packets, lastuse, hw);
 #endif

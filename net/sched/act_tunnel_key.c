@@ -588,6 +588,41 @@ static int tunnel_key_search(struct net *net, struct tc_action **a, u32 index)
 	return tcf_idr_search(tn, a, index);
 }
 
+static int tunnel_key_clone(struct tc_action *new, struct tc_action *orig)
+{
+	struct tcf_tunnel_key_params *params_orig, *params_new;
+	struct tcf_tunnel_key *t;
+
+	params_orig = rcu_dereference_bh(to_tunnel_key(orig)->params);
+	t = to_tunnel_key(new);
+
+	params_new = kzalloc(sizeof(*params_new), GFP_KERNEL);
+	if (unlikely(!params_new))
+		return -ENOMEM;
+
+	params_new->tcft_action = params_orig->tcft_action;
+	if (params_orig->tcft_enc_metadata) {
+		int opts_len = params_orig->tcft_enc_metadata->u.tun_info.options_len;
+		struct metadata_dst *metadata;
+
+		metadata = tun_rx_dst(opts_len);
+		if (!metadata) {
+			kfree(params_new);
+			return -ENOMEM;
+		}
+		memcpy(metadata, params_orig->tcft_enc_metadata, sizeof(*metadata) + opts_len);
+		dst_hold(&params_orig->tcft_enc_metadata->dst);
+		params_new->tcft_enc_metadata = metadata;
+	}
+
+	spin_lock_bh(&t->tcf_lock);
+	rcu_swap_protected(t->params, params_new,
+			   lockdep_is_held(&t->tcf_lock));
+	spin_unlock_bh(&t->tcf_lock);
+
+	return 0;
+}
+
 static struct tc_action_ops act_tunnel_key_ops = {
 	.kind		=	"tunnel_key",
 	.id		=	TCA_ID_TUNNEL_KEY,
@@ -598,6 +633,8 @@ static struct tc_action_ops act_tunnel_key_ops = {
 	.cleanup	=	tunnel_key_release,
 	.walk		=	tunnel_key_walker,
 	.lookup		=	tunnel_key_search,
+	.clone		=	tunnel_key_clone,
+	.pernet_id	=	&tunnel_key_net_id,
 	.size		=	sizeof(struct tcf_tunnel_key),
 };
 

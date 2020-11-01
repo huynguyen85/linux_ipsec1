@@ -156,12 +156,12 @@ void e2e_cache_tp_destroy(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto 
 	return ops->tp_destroy(tcf_e2e_cache, tp);
 }
 
-void e2e_cache_trace_ct(struct flow_offload *flow, int dir)
+void e2e_cache_trace_ct(struct nf_flowtable *nf_ft, struct flow_offload *flow, int dir)
 {
 	if (!ops)
 		return;
 
-	return ops->trace_ct(flow, dir);
+	return ops->trace_ct(nf_ft, flow, dir);
 }
 EXPORT_SYMBOL(e2e_cache_trace_ct);
 

@@ -372,7 +372,7 @@ static void tcf_ct_flow_table_add(struct tcf_ct_flow_table *ct_ft,
 		goto err_add;
 
 	dir = (ctinfo == IP_CT_IS_REPLY ? FLOW_OFFLOAD_DIR_REPLY : FLOW_OFFLOAD_DIR_ORIGINAL);
-	e2e_cache_trace_ct(entry, dir);
+	e2e_cache_trace_ct(&ct_ft->nf_ft, entry, dir);
 	return;
 
 err_add:
@@ -548,7 +548,7 @@ static bool tcf_ct_flow_table_lookup(struct tcf_ct_params *p,
 	nf_conntrack_get(&ct->ct_general);
 	nf_ct_set(skb, ct, ctinfo);
 
-	e2e_cache_trace_ct(flow, dir);
+	e2e_cache_trace_ct(nf_ft, flow, dir);
 
 	return true;
 }

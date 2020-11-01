@@ -835,8 +835,9 @@ e2e_cache_stats_update_walk(const struct tcf_proto *tp, void *fh,
 }
 
 static void
-e2e_cache_trace_ct_impl(struct flow_offload *flow, int dir)
+e2e_cache_trace_ct_impl(struct nf_flowtable *nf_ft, struct flow_offload *flow, int dir)
 {
+	unsigned long cookie = (unsigned long) &flow->tuplehash[!dir].tuple;
 	struct e2e_cache_trace *trace = *this_cpu_ptr(&packet_trace);
 
 	if (!trace || !(trace->flags & E2E_CACHE_TRACE_CACHEABLE))
@@ -850,8 +851,10 @@ e2e_cache_trace_ct_impl(struct flow_offload *flow, int dir)
 	}
 
 	trace->entries[trace->num_entries].type = E2E_CACHE_TRACE_CT;
+	trace->entries[trace->num_entries].nf_ft = nf_ft;
 	trace->entries[trace->num_entries].flow = flow;
 	trace->entries[trace->num_entries].dir = dir;
+	trace->entries[trace->num_entries].cookie = cookie;
 	trace->num_entries++;
 	trace->num_conns++;
 	pr_debug("trace=0x%p flow=0x%p dir=%d num_conns=%d\n", trace

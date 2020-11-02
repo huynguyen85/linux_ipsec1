@@ -267,8 +267,8 @@ static inline bool mlx5_core_is_sf(const struct mlx5_core_dev *dev)
 
 int mlx5_mdev_init(struct mlx5_core_dev *dev, int profile_idx);
 void mlx5_mdev_uninit(struct mlx5_core_dev *dev);
-void mlx5_unload_one(struct mlx5_core_dev *dev, bool cleanup);
-int mlx5_load_one(struct mlx5_core_dev *dev, bool boot);
 
 void mlx5_events_work_enqueue(struct mlx5_core_dev *dev, struct work_struct *work);
+void mlx5_unload_one(struct mlx5_core_dev *dev);
+int mlx5_load_one(struct mlx5_core_dev *dev);
 #endif /* __MLX5_CORE_H__ */

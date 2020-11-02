@@ -480,6 +480,11 @@ be added to the following table:
      - ``drop``
      - Traps packets that the device decided to drop in case they hit a
        blackhole nexthop
+   * - ``dmac_filter``
+     - ``drop``
+     - Traps incoming packets that the device decided to drop in case
+       the destination MAC is not configured in the MAC table
+
 
 Driver-specific Packet Traps
 ============================

@@ -165,6 +165,15 @@ void e2e_cache_trace_ct(struct nf_flowtable *nf_ft, struct flow_offload *flow, i
 }
 EXPORT_SYMBOL(e2e_cache_trace_ct);
 
+void e2e_cache_trace_ft_delete(struct nf_flowtable *nf_ft)
+{
+	if (!ops)
+		return;
+
+	return ops->trace_ft_delete(nf_ft);
+}
+EXPORT_SYMBOL(e2e_cache_trace_ft_delete);
+
 int e2e_cache_classify(struct tcf_e2e_cache *tcf_e2e_cache,
 		       struct sk_buff *skb,
 		       struct tcf_result *res)

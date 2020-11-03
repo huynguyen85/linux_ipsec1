@@ -884,6 +884,11 @@ e2e_cache_filter_update_stats_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 	e2e_cache_entries_walk(tcf_e2e_cache, tp, fh, &e2e_cache_stats_update_walk);
 }
 
+static void
+e2e_cache_trace_ft_delete_impl(struct nf_flowtable *nf_ft)
+{
+}
+
 static struct tcf_e2e_cache *
 e2e_cache_create_impl(struct Qdisc *q, enum flow_block_binder_type binder_type)
 {
@@ -1074,6 +1079,7 @@ static struct e2e_cache_ops e2e_cache_ops = {
 	.tp_destroy	= e2e_cache_tp_destroy_impl,
 	.filter_delete	= e2e_cache_filter_delete_impl,
 	.filter_update_stats	= e2e_cache_filter_update_stats_impl,
+	.trace_ft_delete	= e2e_cache_trace_ft_delete_impl,
 	.classify	= e2e_cache_classify_impl,
 	.dump		= e2e_cache_dump_impl,
 	.indr_cmd	= e2e_cache_indr_cmd_impl,

@@ -327,6 +327,7 @@ static void tcf_ct_flow_table_cleanup_work(struct work_struct *work)
 
 	ct_ft = container_of(to_rcu_work(work), struct tcf_ct_flow_table,
 			     rwork);
+	e2e_cache_trace_ft_delete(&ct_ft->nf_ft);
 	nf_flow_table_free(&ct_ft->nf_ft);
 	kfree(ct_ft);
 

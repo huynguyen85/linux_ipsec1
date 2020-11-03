@@ -38,12 +38,39 @@ struct tcf_block_cb;
 bool tcf_queue_work(struct rcu_work *rwork, work_func_t func);
 
 #ifdef CONFIG_NET_CLS
+
+struct tcf_chain_info {
+	struct tcf_proto __rcu **pprev;
+	struct tcf_proto __rcu *next;
+};
+
 struct tcf_proto *tcf_proto_create_and_insert(const char *kind, u32 protocol, u32 prio,
 					      struct tcf_chain *chain);
+struct tcf_proto *tcf_proto_create(const char *kind, u32 protocol,
+				   u32 prio, struct tcf_chain *chain,
+				   bool rtnl_held,
+				   struct netlink_ext_ack *extack);
+void tcf_chain_hold(struct tcf_chain *chain);
+struct tcf_proto *tcf_chain_tp_insert_unique(struct tcf_chain *chain,
+					     struct tcf_proto *tp_new,
+					     u32 protocol, u32 prio,
+					     bool rtnl_held);
+struct tcf_proto *tcf_chain_tp_find(struct tcf_chain *chain,
+				    struct tcf_chain_info *chain_info,
+				    u32 protocol, u32 prio,
+				    bool prio_allocate);
 void tcf_chain_tp_delete_empty(struct tcf_chain *chain, struct tcf_proto *tp);
+void tcf_chain_hold(struct tcf_chain *chain);
 struct tcf_chain *tcf_chain_get_by_act(struct tcf_block *block,
 				       u32 chain_index);
+void tcf_chain_put(struct tcf_chain *chain);
 void tcf_chain_put_by_act(struct tcf_chain *chain);
+struct tcf_chain *tcf_chain_create(struct tcf_block *block,
+				   u32 chain_index,
+				   bool is_e2e_cache_chain);
+bool tcf_chain_dump(struct tcf_chain *chain, struct Qdisc *q, u32 parent,
+		    struct sk_buff *skb, struct netlink_callback *cb,
+		    long index_start, long *p_index, bool terse);
 struct tcf_chain *tcf_get_next_chain(struct tcf_block *block,
 				     struct tcf_chain *chain);
 struct tcf_proto *tcf_get_next_proto(struct tcf_chain *chain,
@@ -55,11 +82,15 @@ int tcf_block_get(struct tcf_block **p_block,
 		  struct tcf_proto __rcu **p_filter_chain, struct Qdisc *q,
 		  struct netlink_ext_ack *extack);
 int tcf_block_get_ext(struct tcf_block **p_block, struct Qdisc *q,
-		      struct tcf_block_ext_info *ei,
+		      struct tcf_block_ext_info *ei, bool cache,
 		      struct netlink_ext_ack *extack);
 void tcf_block_put(struct tcf_block *block);
 void tcf_block_put_ext(struct tcf_block *block, struct Qdisc *q,
 		       struct tcf_block_ext_info *ei);
+void tc_indr_block_cmd(struct net_device *dev, struct tcf_block *block,
+		       flow_indr_block_bind_cb_t *cb, void *cb_priv,
+		       enum flow_block_command command,
+		       enum flow_block_binder_type binder_type);
 
 static inline bool tcf_block_shared(struct tcf_block *block)
 {
@@ -580,9 +611,6 @@ int tc_setup_cb_reoffload(struct tcf_block *block, struct tcf_proto *tp,
 			  enum tc_setup_type type, void *type_data,
 			  void *cb_priv, u32 *flags, unsigned int *in_hw_count);
 unsigned int tcf_exts_num_actions(struct tcf_exts *exts);
-
-int tcf_block_create_e2e_cache(struct tcf_block *block);
-void tcf_block_destroy_e2e_cache(struct tcf_block *block);
 
 struct tc_cls_u32_knode {
 	struct tcf_exts *exts;

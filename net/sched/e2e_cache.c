@@ -74,6 +74,7 @@ struct e2e_cache_entry_stats {
 
 struct e2e_cache_entry {
 	struct e2e_cache_trace_entry entries[E2E_CACHE_MAX_TRACE_ENTRIES];
+	const struct tcf_proto_ops *tp_ops;
 	int num_entries;
 
 	void *merged_fh;
@@ -87,8 +88,7 @@ struct e2e_cache_entry {
 };
 
 struct tcf_e2e_cache {
-	struct tcf_chain *tcf_e2e_chain;
-	struct tcf_proto *tp;
+	struct tcf_block *block;
 	struct e2e_cache_entry *entry;
 };
 
@@ -96,6 +96,23 @@ static DEFINE_PER_CPU(struct e2e_cache_trace *, packet_trace);
 static DECLARE_BITMAP(e2e_tracing_bm, E2E_TRACING_BM_SIZE) = {0};
 static struct kmem_cache *e2e_cache_mem;
 static struct workqueue_struct *e2e_wq;
+static const u32 prio = 1 << 16;
+
+static struct tcf_proto *
+e2e_cache_lookup_tp(struct tcf_block *block, const struct tcf_proto_ops *ops,
+		    u32 prio)
+{
+	struct tcf_chain_info chain_info;
+	struct tcf_proto *tp;
+
+	tp = tcf_chain_tp_find(block->chain0.chain, &chain_info, ETH_P_ALL,
+			       prio, false);
+	if (IS_ERR_OR_NULL(tp))
+		return tp;
+	else if (tp->ops != ops)
+		return ERR_PTR(-EINVAL);
+	return tp;
+}
 
 static bool
 e2e_cache_extract_ipv4(struct sk_buff *skb, struct e2e_cache_tuple *tuple)
@@ -238,40 +255,47 @@ static void e2e_cache_trace_process_work(struct work_struct *work)
 	struct tcf_e2e_cache *tcf_e2e_cache = trace->tcf_e2e_cache;
 	struct e2e_cache_trace_data trace_data;
 	struct e2e_cache_entry *merged_entry;
+	struct tcf_proto *tp;
 	void *merged_fh;
 	int err;
 
 	pr_debug("process work\n");
 
-	/* Only room for one tp kind for now */
-	if (tcf_e2e_cache->tp->ops != trace->ops)
-		goto err_out;
+	tp = e2e_cache_lookup_tp(tcf_e2e_cache->block, trace->ops, prio);
+	if (IS_ERR_OR_NULL(tp)) {
+		pr_err("tp not found\n");
+		goto err_out_tp;
+	}
 
 	/* call the classifier's merge */
 	trace_data.entries = trace->entries;
 	trace_data.num_entries = trace->num_entries;
 	trace_data.protocol = trace->protocol;
 
-	err = trace->ops->merge(tcf_e2e_cache->tp, &trace_data, &merged_fh);
+	err = trace->ops->merge(tp, &trace_data, &merged_fh);
 	if (err) {
 		pr_debug("merge failed, err %d\n", err);
-		goto err_out;
+		goto err_out_merge;
 	}
 
 	merged_entry = kzalloc(sizeof(*merged_entry), GFP_KERNEL);
 	if (!merged_entry)
-		goto err_out;
+		goto err_out_alloc;
 
 	memcpy(&merged_entry->entries, &trace->entries, sizeof(trace->entries));
 	merged_entry->num_entries = trace->num_entries;
 	merged_entry->merged_fh = merged_fh;
+	merged_entry->tp_ops = tp->ops;
 
 	tcf_e2e_cache->entry = merged_entry;
 	e2e_cache_trace_release(trace);
 
 	return;
 
-err_out:
+err_out_alloc:
+err_out_merge:
+	tcf_proto_put(tp, false, NULL);
+err_out_tp:
 	e2e_cache_trace_release(trace);
 }
 
@@ -444,10 +468,17 @@ trace_failed:
 static void
 e2e_cache_entry_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_entry *entry)
 {
-	struct tcf_proto *tp = tcf_e2e_cache->tp;
+	struct tcf_proto *tp;
 	bool last;
 
+	tp = e2e_cache_lookup_tp(tcf_e2e_cache->block, entry->tp_ops, prio);
+	if (IS_ERR_OR_NULL(tp)) {
+		pr_err("tp not found\n");
+		return;
+	}
+
 	tp->ops->delete(tp, entry->merged_fh, &last, true, NULL);
+	tcf_proto_put(tp, false, NULL);
 
 	/* for now we only have one entry so no need to check last */
 	kfree(tcf_e2e_cache->entry);
@@ -460,17 +491,24 @@ e2e_cache_entry_update(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_ent
 	struct gnet_stats_basic_packed bstats = {0}, bstats_hw = {0};
 	struct flow_stats flow_stats;
 	struct tcf_exts *exts;
+	struct tcf_proto *tp;
 
 	if (!time_after(jiffies, entry->last_query + jiffies_to_msecs(1000)))
 		return;
 
+	tp = e2e_cache_lookup_tp(tcf_e2e_cache->block, entry->tp_ops, prio);
+	if (IS_ERR_OR_NULL(tp)) {
+		pr_err("tp not found\n");
+		return;
+	}
+
 	entry->last_query = jiffies;
 
 	// hw stats diff
-	tcf_e2e_cache->tp->ops->get_hw_stats(tcf_e2e_cache->tp, entry->merged_fh, &flow_stats);
+	tp->ops->get_hw_stats(tp, entry->merged_fh, &flow_stats);
 
 	// calc sw stats diff
-	exts = tcf_e2e_cache->tp->ops->get_exts(tcf_e2e_cache->tp, entry->merged_fh);
+	exts = tp->ops->get_exts(tp, entry->merged_fh);
 	__gnet_stats_copy_basic(NULL, &bstats, exts->actions[0]->cpu_bstats, &exts->actions[0]->tcfa_bstats);
 	__gnet_stats_copy_basic(NULL, &bstats_hw, exts->actions[0]->cpu_bstats_hw, &exts->actions[0]->tcfa_bstats_hw);
 
@@ -479,6 +517,7 @@ e2e_cache_entry_update(struct tcf_e2e_cache *tcf_e2e_cache, struct e2e_cache_ent
 	entry->entry_stats_hw.pkts = bstats_hw.packets;
 	entry->entry_stats_hw.bytes = bstats_hw.bytes;
 	entry->lastused = max_t(u64, entry->lastused, exts->actions[0]->tcfa_tm.lastuse);
+	tcf_proto_put(tp, false, NULL);
 }
 
 static void
@@ -565,33 +604,115 @@ e2e_cache_filter_update_stats_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 }
 
 static struct tcf_e2e_cache *
-e2e_cache_create_impl(struct tcf_chain *tcf_e2e_chain,
-		      struct tcf_proto *tp)
+e2e_cache_create_impl(struct Qdisc *q, enum flow_block_binder_type binder_type)
 {
-	struct tcf_e2e_cache *tcf_e2e_cache;
+	struct tcf_block_ext_info ei = {
+		.chain_head_change_priv = q,
+		.block_index = TCF_BLOCK_E2E_CACHE,
+	};
+	struct tcf_proto *tp, *tp_new;
+	struct tcf_e2e_cache *e2e_cache;
+	struct tcf_block *block;
+	struct tcf_chain *chain;
+	int err;
 
-	tcf_e2e_cache = kzalloc(sizeof(*tcf_e2e_cache), GFP_KERNEL);
-	if (!tcf_e2e_cache)
+	if (binder_type == FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS)
+		ei.binder_type = FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS_E2E;
+	else
+		return ERR_PTR(-EOPNOTSUPP);
+
+	e2e_cache = kzalloc(sizeof(*e2e_cache), GFP_KERNEL);
+	if (!e2e_cache)
 		return ERR_PTR(-ENOMEM);
 
+	err = tcf_block_get_ext(&block, q, &ei, false, NULL);
+	if (err)
+		goto err_block;
+
+	mutex_lock(&block->lock);
+	chain = tcf_chain_create(block, 0, true);
+	mutex_unlock(&block->lock);
+	if (!chain) {
+		err = -ENOMEM;
+		goto err_chain;
+	}
+
+err_eagain:
+	tp_new = tcf_proto_create("flower", ETH_P_ALL, prio, chain, true, NULL);
+	if (IS_ERR(tp_new)) {
+		/* first user, module was loaded */
+		if (PTR_ERR(tp_new) == -EAGAIN)
+			goto err_eagain;
+		err = PTR_ERR(tp_new);
+		goto err_tp;
+	}
+
+	tp = tcf_chain_tp_insert_unique(chain, tp_new, ETH_P_ALL, prio, true);
+	if (IS_ERR(tp)) {
+		err = PTR_ERR(tp);
+		goto err_tp;
+	}
+	/* insert function acquired new reference */
+	tcf_proto_put(tp, true, NULL);
+
+	/* persistent chain that is not deleted with last tp */
+	mutex_lock(&chain->block->lock);
+	tcf_chain_hold(chain);
+	chain->explicitly_created = true;
+	mutex_unlock(&chain->block->lock);
+
 	__module_get(THIS_MODULE);
+	e2e_cache->block = block;
+	pr_debug("chain=0x%p tp=0x%p\n", chain, tp);
 
-	tcf_e2e_cache->tcf_e2e_chain = tcf_e2e_chain;
-	tcf_e2e_cache->tp = tp;
-	pr_debug("chain=0x%p tp=0x%p\n", tcf_e2e_chain, tp);
+	return e2e_cache;
 
-	return tcf_e2e_cache;
+err_tp:
+	tcf_chain_put(chain);
+err_chain:
+	tcf_block_put_ext(block, q, &ei);
+err_block:
+	kfree(e2e_cache);
+	return ERR_PTR(err);
 }
 
 static void
-e2e_cache_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache)
+e2e_cache_destroy_impl(struct tcf_e2e_cache *tcf_e2e_cache, struct Qdisc *q,
+		       enum flow_block_binder_type binder_type)
 {
+	struct tcf_block_ext_info ei = {
+		.chain_head_change_priv = q,
+		.block_index = TCF_BLOCK_E2E_CACHE,
+	};
+
+	if (binder_type == FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS)
+		ei.binder_type = FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS_E2E;
+	else
+		WARN_ON(1);
+
 	if (tcf_e2e_cache->entry)
 		e2e_cache_entry_delete(tcf_e2e_cache, tcf_e2e_cache->entry);
 
+	tcf_block_put_ext(tcf_e2e_cache->block, q, &ei);
 	module_put(THIS_MODULE);
 	kfree(tcf_e2e_cache);
 	pr_debug("Cache destroyed\n");
+}
+
+static void
+e2e_cache_indr_cmd_impl(struct tcf_e2e_cache *tcf_e2e_cache,
+			struct net_device *dev,
+			flow_indr_block_bind_cb_t *cb, void *cb_priv,
+			enum flow_block_command command,
+			enum flow_block_binder_type binder_type)
+{
+	struct tcf_block *block = tcf_e2e_cache->block;
+
+	if (binder_type == FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS)
+		tc_indr_block_cmd(dev, block, cb, cb_priv, command,
+				  FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS_E2E);
+	else
+		WARN_ON(1);
 }
 
 static int
@@ -599,9 +720,13 @@ e2e_cache_classify_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 			struct sk_buff *skb,
 			struct tcf_result *res)
 {
-	struct tcf_chain *cache_chain = tcf_e2e_cache->tcf_e2e_chain;
+	struct tcf_chain *cache_chain;
 	struct tcf_proto *tp;
 
+	if (!tcf_e2e_cache)
+		return -ENOENT;
+
+	cache_chain = tcf_e2e_cache->block->chain0.chain;
 	for (tp = rcu_dereference_bh(cache_chain->filter_chain);
 	     tp; tp = rcu_dereference_bh(tp->next)) {
 		int err = tp->classify(skb, tp, res);
@@ -616,6 +741,17 @@ e2e_cache_classify_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 	return -1;
 }
 
+static int e2e_cache_dump_impl(struct tcf_e2e_cache *tcf_e2e_cache,
+			       struct sk_buff *skb,
+			       struct netlink_callback *cb, long index_start,
+			       long *index, bool terse_dump)
+{
+	if (!tcf_chain_dump(tcf_e2e_cache->block->chain0.chain, NULL, 0, skb,
+			    cb, index_start, index, terse_dump))
+		return -EMSGSIZE;
+	return 0;
+}
+
 static struct e2e_cache_ops e2e_cache_ops = {
 	.create		= e2e_cache_create_impl,
 	.destroy	= e2e_cache_destroy_impl,
@@ -627,6 +763,8 @@ static struct e2e_cache_ops e2e_cache_ops = {
 	.filter_delete	= e2e_cache_filter_delete_impl,
 	.filter_update_stats	= e2e_cache_filter_update_stats_impl,
 	.classify	= e2e_cache_classify_impl,
+	.dump		= e2e_cache_dump_impl,
+	.indr_cmd	= e2e_cache_indr_cmd_impl,
 };
 
 static int

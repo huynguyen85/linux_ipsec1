@@ -249,10 +249,10 @@ static bool tcf_proto_is_unlocked(const char *kind)
 	return ret;
 }
 
-static struct tcf_proto *tcf_proto_create(const char *kind, u32 protocol,
-					  u32 prio, struct tcf_chain *chain,
-					  bool rtnl_held,
-					  struct netlink_ext_ack *extack)
+struct tcf_proto *tcf_proto_create(const char *kind, u32 protocol,
+				   u32 prio, struct tcf_chain *chain,
+				   bool rtnl_held,
+				   struct netlink_ext_ack *extack)
 {
 	struct tcf_proto *tp;
 	int err;
@@ -284,6 +284,7 @@ errout:
 	kfree(tp);
 	return ERR_PTR(err);
 }
+EXPORT_SYMBOL(tcf_proto_create);
 
 static void tcf_proto_get(struct tcf_proto *tp)
 {
@@ -295,8 +296,6 @@ bool tcf_proto_get_not_zero(struct tcf_proto *tp)
 	return refcount_inc_not_zero(&tp->refcnt);
 }
 EXPORT_SYMBOL(tcf_proto_get_not_zero);
-
-static void tcf_chain_put(struct tcf_chain *chain);
 
 static void tcf_proto_destroy(struct tcf_proto *tp, bool rtnl_held,
 			      bool sig_destroy, struct netlink_ext_ack *extack)
@@ -356,9 +355,9 @@ struct tcf_filter_chain_list_item {
 	void *chain_head_change_priv;
 };
 
-static struct tcf_chain *__tcf_chain_create(struct tcf_block *block,
-					    u32 chain_index,
-					    bool is_e2e_cache_chain)
+struct tcf_chain *tcf_chain_create(struct tcf_block *block,
+				   u32 chain_index,
+				   bool is_e2e_cache_chain)
 {
 	struct tcf_chain *chain;
 
@@ -367,23 +366,17 @@ static struct tcf_chain *__tcf_chain_create(struct tcf_block *block,
 	chain = kzalloc(sizeof(*chain), GFP_KERNEL);
 	if (!chain)
 		return NULL;
-	if (!is_e2e_cache_chain)
-		list_add_tail_rcu(&chain->list, &block->chain_list);
+	list_add_tail_rcu(&chain->list, &block->chain_list);
 	mutex_init(&chain->filter_chain_lock);
 	chain->block = block;
 	chain->index = chain_index;
 	chain->refcnt = 1;
 	chain->is_e2e_cache_chain = is_e2e_cache_chain;
-	if (!chain->index && !is_e2e_cache_chain)
+	if (!chain->index)
 		block->chain0.chain = chain;
 	return chain;
 }
-
-static struct tcf_chain *tcf_chain_create(struct tcf_block *block,
-					  u32 chain_index)
-{
-	return __tcf_chain_create(block, chain_index, false);
-}
+EXPORT_SYMBOL(tcf_chain_create);
 
 static void tcf_chain_head_change_item(struct tcf_filter_chain_list_item *item,
 				       struct tcf_proto *tp_head)
@@ -398,7 +391,7 @@ static void tcf_chain0_head_change(struct tcf_chain *chain,
 	struct tcf_filter_chain_list_item *item;
 	struct tcf_block *block = chain->block;
 
-	if (chain->index || chain->is_e2e_cache_chain)
+	if (chain->index)
 		return;
 
 	mutex_lock(&block->lock);
@@ -415,11 +408,9 @@ static bool tcf_chain_detach(struct tcf_chain *chain)
 
 	ASSERT_BLOCK_LOCKED(block);
 
-	if (!chain->is_e2e_cache_chain) {
-		list_del_rcu(&chain->list);
-		if (!chain->index)
-			block->chain0.chain = NULL;
-	}
+	list_del_rcu(&chain->list);
+	if (!chain->index)
+		block->chain0.chain = NULL;
 
 	if (list_empty(&block->chain_list) &&
 	    refcount_read(&block->refcnt) == 0)
@@ -445,12 +436,13 @@ static void tcf_chain_destroy(struct tcf_chain *chain, bool free_block)
 		tcf_block_destroy(block);
 }
 
-static void tcf_chain_hold(struct tcf_chain *chain)
+void tcf_chain_hold(struct tcf_chain *chain)
 {
 	ASSERT_BLOCK_LOCKED(chain->block);
 
 	++chain->refcnt;
 }
+EXPORT_SYMBOL(tcf_chain_hold);
 
 static bool tcf_chain_held_by_acts_only(struct tcf_chain *chain)
 {
@@ -507,7 +499,7 @@ static struct tcf_chain *__tcf_chain_get(struct tcf_block *block,
 	} else {
 		if (!create)
 			goto errout;
-		chain = tcf_chain_create(block, chain_index);
+		chain = tcf_chain_create(block, chain_index, false);
 		if (!chain)
 			goto errout;
 	}
@@ -599,10 +591,11 @@ static void __tcf_chain_put(struct tcf_chain *chain, bool by_act,
 	}
 }
 
-static void tcf_chain_put(struct tcf_chain *chain)
+void tcf_chain_put(struct tcf_chain *chain)
 {
 	__tcf_chain_put(chain, false, false);
 }
+EXPORT_SYMBOL(tcf_chain_put);
 
 void tcf_chain_put_by_act(struct tcf_chain *chain)
 {
@@ -642,31 +635,35 @@ static void tcf_chain_flush(struct tcf_chain *chain, bool rtnl_held)
 static int tcf_block_setup(struct tcf_block *block,
 			   struct flow_block_offload *bo);
 
-static void tc_indr_block_cmd(struct net_device *dev, struct tcf_block *block,
-			      flow_indr_block_bind_cb_t *cb, void *cb_priv,
-			      enum flow_block_command command, bool ingress)
+void tc_indr_block_cmd(struct net_device *dev, struct tcf_block *block,
+		       flow_indr_block_bind_cb_t *cb, void *cb_priv,
+		       enum flow_block_command command,
+		       enum flow_block_binder_type binder_type)
 {
 	struct flow_block_offload bo = {
 		.command	= command,
-		.binder_type	= ingress ?
-				  FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS :
-				  FLOW_BLOCK_BINDER_TYPE_CLSACT_EGRESS,
+		.binder_type	= binder_type,
 		.net		= dev_net(dev),
 		.block_shared	= tcf_block_non_null_shared(block),
 	};
+	enum tc_setup_type setup_type;
 	INIT_LIST_HEAD(&bo.cb_list);
 
 	if (!block)
 		return;
 
+	setup_type = binder_type == FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS_E2E ?
+				    TC_SETUP_E2E_BLOCK : TC_SETUP_BLOCK;
+
 	bo.block = &block->flow_block;
 
 	down_write(&block->cb_lock);
-	cb(dev, cb_priv, TC_SETUP_BLOCK, &bo);
+	cb(dev, cb_priv, setup_type, &bo);
 
 	tcf_block_setup(block, &bo);
 	up_write(&block->cb_lock);
 }
+EXPORT_SYMBOL(tc_indr_block_cmd);
 
 static struct tcf_block *tc_dev_block(struct net_device *dev, bool ingress)
 {
@@ -708,10 +705,16 @@ static void tc_indr_block_get_and_cmd(struct net_device *dev,
 	struct tcf_block *block;
 
 	block = tc_dev_block(dev, true);
-	tc_indr_block_cmd(dev, block, cb, cb_priv, command, true);
+	tc_indr_block_cmd(dev, block, cb, cb_priv, command,
+			  FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS);
+	if (block && block->tcf_e2e_cache)
+		e2e_cache_indr_cmd(block->tcf_e2e_cache, dev, cb, cb_priv,
+				   command,
+				   FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS);
 
 	block = tc_dev_block(dev, false);
-	tc_indr_block_cmd(dev, block, cb, cb_priv, command, false);
+	tc_indr_block_cmd(dev, block, cb, cb_priv, command,
+			  FLOW_BLOCK_BINDER_TYPE_CLSACT_EGRESS);
 }
 
 static void tc_indr_block_call(struct tcf_block *block,
@@ -756,7 +759,9 @@ static int tcf_block_offload_cmd(struct tcf_block *block,
 	bo.extack = extack;
 	INIT_LIST_HEAD(&bo.cb_list);
 
-	err = dev->netdev_ops->ndo_setup_tc(dev, TC_SETUP_BLOCK, &bo);
+	err = ei->binder_type == FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS_E2E ?
+		dev->netdev_ops->ndo_setup_tc(dev, TC_SETUP_E2E_BLOCK, &bo) :
+		dev->netdev_ops->ndo_setup_tc(dev, TC_SETUP_BLOCK, &bo);
 	if (err < 0)
 		return err;
 
@@ -1201,6 +1206,30 @@ static int __tcf_qdisc_cl_find(struct Qdisc *q, u32 parent, unsigned long *cl,
 	return 0;
 }
 
+static int tcf_block_create_e2e_cache(struct tcf_block *block, struct Qdisc *q,
+				      enum flow_block_binder_type binder_type)
+{
+	struct tcf_e2e_cache *tcf_e2e_cache;
+
+	tcf_e2e_cache = e2e_cache_create(q, binder_type);
+	if (IS_ERR(tcf_e2e_cache))
+		return PTR_ERR(tcf_e2e_cache);
+
+	block->tcf_e2e_cache = tcf_e2e_cache;
+	return 0;
+}
+
+static void tcf_block_destroy_e2e_cache(struct tcf_block *block,
+					struct Qdisc *q,
+					enum flow_block_binder_type binder_type)
+{
+	if (!block->tcf_e2e_cache)
+		return;
+
+	e2e_cache_destroy(block->tcf_e2e_cache, q, binder_type);
+	block->tcf_e2e_cache = NULL;
+}
+
 static struct tcf_block *__tcf_block_find(struct net *net, struct Qdisc *q,
 					  unsigned long cl, int ifindex,
 					  u32 block_index,
@@ -1254,14 +1283,17 @@ static void __tcf_block_put(struct tcf_block *block, struct Qdisc *q,
 		if (tcf_block_shared(block))
 			tcf_block_remove(block, block->net);
 
-		if (q)
+		if (q) {
+			tcf_block_destroy_e2e_cache(block, q, ei->binder_type);
 			tcf_block_offload_unbind(block, q, ei);
+		}
 
 		if (free_block)
 			tcf_block_destroy(block);
 		else
 			tcf_block_flush_all_chains(block, rtnl_held);
 	} else if (q) {
+		tcf_block_destroy_e2e_cache(block, q, ei->binder_type);
 		tcf_block_offload_unbind(block, q, ei);
 	}
 }
@@ -1383,11 +1415,12 @@ static void tcf_block_owner_del(struct tcf_block *block,
 }
 
 int tcf_block_get_ext(struct tcf_block **p_block, struct Qdisc *q,
-		      struct tcf_block_ext_info *ei,
+		      struct tcf_block_ext_info *ei, bool cache,
 		      struct netlink_ext_ack *extack)
 {
 	struct net *net = qdisc_net(q);
 	struct tcf_block *block = NULL;
+	bool created = false;
 	int err;
 
 	if (ei->block_index)
@@ -1403,6 +1436,7 @@ int tcf_block_get_ext(struct tcf_block **p_block, struct Qdisc *q,
 			if (err)
 				goto err_block_insert;
 		}
+		created = true;
 	}
 
 	err = tcf_block_owner_add(block, q, ei->binder_type);
@@ -1419,9 +1453,17 @@ int tcf_block_get_ext(struct tcf_block **p_block, struct Qdisc *q,
 	if (err)
 		goto err_block_offload_bind;
 
+	if (cache && created) {
+		err = tcf_block_create_e2e_cache(block, q, ei->binder_type);
+		if (err)
+			goto err_block_cache_create;
+	}
+
 	*p_block = block;
 	return 0;
 
+err_block_cache_create:
+	tcf_block_offload_unbind(block, q, ei);
 err_block_offload_bind:
 	tcf_chain0_head_change_cb_del(block, ei);
 err_chain0_head_change_cb_add:
@@ -1450,7 +1492,7 @@ int tcf_block_get(struct tcf_block **p_block,
 	};
 
 	WARN_ON(!p_filter_chain);
-	return tcf_block_get_ext(p_block, q, &ei, extack);
+	return tcf_block_get_ext(p_block, q, &ei, false, extack);
 }
 EXPORT_SYMBOL(tcf_block_get);
 
@@ -1616,12 +1658,15 @@ static inline int __tcf_classify(struct sk_buff *skb,
 				 u32 *last_executed_chain)
 {
 #ifdef CONFIG_NET_CLS_ACT
+	struct tcf_e2e_cache *e2e_cache = NULL;
 	const struct tcf_proto *first_tp;
 	int limit = 0;
 
 	if (tp && tp->chain->block->tcf_e2e_cache) {
-		struct tcf_e2e_cache *e2e_cache = tp->chain->block->tcf_e2e_cache;
-		int err = e2e_cache_classify(e2e_cache, skb, res);
+		int err;
+
+		e2e_cache = tp->chain->block->tcf_e2e_cache;
+		err = e2e_cache_classify(e2e_cache, skb, res);
 
 		if (err >= 0)
 			return err;
@@ -1639,9 +1684,9 @@ reclassify:
 			continue;
 
 		err = tp->classify(skb, tp, res);
-		if (tp->chain->block->tcf_e2e_chain && err >= 0)
-			e2e_cache_trace_tp(skb, tp, err, res);
 #ifdef CONFIG_NET_CLS_ACT
+		if (e2e_cache && err >= 0)
+			e2e_cache_trace_tp(skb, tp, err, res);
 		if (unlikely(err == TC_ACT_RECLASSIFY && !compat_mode)) {
 			first_tp = orig_tp;
 			*last_executed_chain = first_tp->chain->index;
@@ -1736,11 +1781,6 @@ int tcf_classify_ingress(struct sk_buff *skb,
 }
 EXPORT_SYMBOL(tcf_classify_ingress);
 
-struct tcf_chain_info {
-	struct tcf_proto __rcu **pprev;
-	struct tcf_proto __rcu *next;
-};
-
 static struct tcf_proto *tcf_chain_tp_prev(struct tcf_chain *chain,
 					   struct tcf_chain_info *chain_info)
 {
@@ -1775,20 +1815,15 @@ static void tcf_chain_tp_remove(struct tcf_chain *chain,
 	RCU_INIT_POINTER(*chain_info->pprev, next);
 }
 
-static struct tcf_proto *tcf_chain_tp_find(struct tcf_chain *chain,
-					   struct tcf_chain_info *chain_info,
-					   u32 protocol, u32 prio,
-					   bool prio_allocate);
-
 /* Try to insert new proto.
  * If proto with specified priority already exists, free new proto
  * and return existing one.
  */
 
-static struct tcf_proto *tcf_chain_tp_insert_unique(struct tcf_chain *chain,
-						    struct tcf_proto *tp_new,
-						    u32 protocol, u32 prio,
-						    bool rtnl_held)
+struct tcf_proto *tcf_chain_tp_insert_unique(struct tcf_chain *chain,
+					     struct tcf_proto *tp_new,
+					     u32 protocol, u32 prio,
+					     bool rtnl_held)
 {
 	struct tcf_chain_info chain_info;
 	struct tcf_proto *tp;
@@ -1818,6 +1853,7 @@ static struct tcf_proto *tcf_chain_tp_insert_unique(struct tcf_chain *chain,
 
 	return tp_new;
 }
+EXPORT_SYMBOL(tcf_chain_tp_insert_unique);
 
 struct tcf_proto *__tcf_proto_create_and_insert(const char *kind, u32 protocol, u32 prio,
 						struct tcf_chain *chain, bool rtnl_held,
@@ -1899,10 +1935,10 @@ void tcf_chain_tp_delete_empty(struct tcf_chain *chain, struct tcf_proto *tp)
 }
 EXPORT_SYMBOL(tcf_chain_tp_delete_empty);
 
-static struct tcf_proto *tcf_chain_tp_find(struct tcf_chain *chain,
-					   struct tcf_chain_info *chain_info,
-					   u32 protocol, u32 prio,
-					   bool prio_allocate)
+struct tcf_proto *tcf_chain_tp_find(struct tcf_chain *chain,
+				    struct tcf_chain_info *chain_info,
+				    u32 protocol, u32 prio,
+				    bool prio_allocate)
 {
 	struct tcf_proto **pprev;
 	struct tcf_proto *tp;
@@ -1931,6 +1967,7 @@ static struct tcf_proto *tcf_chain_tp_find(struct tcf_chain *chain,
 	}
 	return tp;
 }
+EXPORT_SYMBOL(tcf_chain_tp_find);
 
 static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 			 struct tcf_proto *tp, struct tcf_block *block,
@@ -2623,9 +2660,9 @@ static int tcf_node_dump(struct tcf_proto *tp, void *n, struct tcf_walker *arg)
 			     RTM_NEWTFILTER, a->terse_dump, true);
 }
 
-static bool tcf_chain_dump(struct tcf_chain *chain, struct Qdisc *q, u32 parent,
-			   struct sk_buff *skb, struct netlink_callback *cb,
-			   long index_start, long *p_index, bool terse)
+bool tcf_chain_dump(struct tcf_chain *chain, struct Qdisc *q, u32 parent,
+		    struct sk_buff *skb, struct netlink_callback *cb,
+		    long index_start, long *p_index, bool terse)
 {
 	struct net *net = sock_net(skb->sk);
 	struct tcf_block *block = chain->block;
@@ -2683,6 +2720,7 @@ errout:
 	tcf_proto_put(tp, true, NULL);
 	return false;
 }
+EXPORT_SYMBOL(tcf_chain_dump);
 
 static const struct nla_policy tcf_tfilter_dump_policy[TCA_MAX + 1] = {
 	[TCA_DUMP_FLAGS] = NLA_POLICY_BITFIELD32(TCA_DUMP_FLAGS_TERSE |
@@ -2699,7 +2737,7 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 	struct tcf_block *block;
 	struct tcmsg *tcm = nlmsg_data(cb->nlh);
 	bool terse_dump = false;
-	bool e2e_cache_dump = false;
+	bool cache_dump = false;
 	long index_start;
 	long index;
 	u32 parent;
@@ -2718,7 +2756,7 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 			nla_get_bitfield32(tca[TCA_DUMP_FLAGS]);
 
 		terse_dump = flags.value & TCA_DUMP_FLAGS_TERSE;
-		e2e_cache_dump = flags.value & TCA_DUMP_FLAGS_E2E_CACHE;
+		cache_dump = flags.value & TCA_DUMP_FLAGS_E2E_CACHE;
 	}
 
 	if (tcm->tcm_ifindex == TCM_IFINDEX_MAGIC_BLOCK) {
@@ -2769,14 +2807,7 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 	index_start = cb->args[0];
 	index = 0;
 
-	if (e2e_cache_dump && block->tcf_e2e_cache) {
-		if ((!tca[TCA_CHAIN] || nla_get_u32(tca[TCA_CHAIN]) == 0) &&
-		    !tcf_chain_dump(block->tcf_e2e_chain, q, parent, skb, cb, index_start,
-				    &index, terse_dump))
-			err = -EMSGSIZE;
-	}
-
-	if (!e2e_cache_dump) {
+	if (!cache_dump) {
 		for (chain = __tcf_get_next_chain(block, NULL);
 		     chain;
 		     chain_prev = chain,
@@ -2792,6 +2823,10 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 				break;
 			}
 		}
+	} else if (block->tcf_e2e_cache &&
+		   (!tca[TCA_CHAIN] || nla_get_u32(tca[TCA_CHAIN]) == 0)) {
+		err = e2e_cache_dump(block->tcf_e2e_cache, skb, cb,
+				     index_start, &index, terse_dump);
 	}
 
 	if (tcm->tcm_ifindex == TCM_IFINDEX_MAGIC_BLOCK)
@@ -3019,7 +3054,7 @@ replay:
 				err = -ENOENT;
 				goto errout_block_locked;
 			}
-			chain = tcf_chain_create(block, chain_index);
+			chain = tcf_chain_create(block, chain_index, false);
 			if (!chain) {
 				NL_SET_ERR_MSG(extack, "Failed to create filter chain");
 				err = -ENOMEM;
@@ -3807,66 +3842,6 @@ unsigned int tcf_exts_num_actions(struct tcf_exts *exts)
 	return num_acts;
 }
 EXPORT_SYMBOL(tcf_exts_num_actions);
-
-int tcf_block_create_e2e_cache(struct tcf_block *block)
-{
-	struct tcf_e2e_cache *tcf_e2e_cache;
-	struct tcf_chain *chain;
-	struct tcf_proto *tp;
-	int err;
-
-	mutex_lock(&block->lock);
-	chain = __tcf_chain_create(block, 0, true);
-	mutex_unlock(&block->lock);
-
-	if (!chain)
-		return -ENOMEM;
-
-err_eagain:
-	tp = tcf_proto_create_and_insert("flower", ETH_P_ALL, 1 << 16, chain);
-	if (IS_ERR(tp)) {
-		if (PTR_ERR(tp) == -EAGAIN) /* first user, module was loaded */
-			goto err_eagain;
-		tcf_chain_put(chain);
-		return PTR_ERR(tp);
-	}
-
-	tcf_e2e_cache = e2e_cache_create(chain, tp);
-	if (IS_ERR(tcf_e2e_cache)) {
-		err = PTR_ERR(tcf_e2e_cache);
-		goto err_create;
-	}
-
-	block->tcf_e2e_cache = tcf_e2e_cache;
-	block->tcf_e2e_chain = chain;
-	block->tcf_e2e_tp = tp;
-
-	return 0;
-
-err_create:
-	tcf_chain_tp_delete_empty(chain, tp);
-	tcf_proto_put(tp, true, NULL);
-	return err;
-}
-EXPORT_SYMBOL(tcf_block_create_e2e_cache);
-
-void tcf_block_destroy_e2e_cache(struct tcf_block *block)
-{
-	if (!block || !block->tcf_e2e_cache)
-		return;
-
-	e2e_cache_destroy(block->tcf_e2e_cache);
-	block->tcf_e2e_cache = NULL;
-
-	tcf_chain_tp_delete_empty(block->tcf_e2e_chain, block->tcf_e2e_tp);
-	tcf_proto_put(block->tcf_e2e_tp, true, NULL);
-	block->tcf_e2e_tp = NULL;
-
-	tcf_chain_flush(block->tcf_e2e_chain, true);
-	tcf_chain_put(block->tcf_e2e_chain);
-	block->tcf_e2e_chain = NULL;
-}
-EXPORT_SYMBOL(tcf_block_destroy_e2e_cache);
 
 static __net_init int tcf_net_init(struct net *net)
 {

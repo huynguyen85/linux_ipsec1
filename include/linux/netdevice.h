@@ -851,6 +851,7 @@ enum tc_setup_type {
 	TC_SETUP_QDISC_GRED,
 	TC_SETUP_QDISC_TAPRIO,
 	TC_SETUP_FT,
+	TC_SETUP_E2E_BLOCK,
 };
 
 /* These structures hold the attributes of bpf state that are being passed

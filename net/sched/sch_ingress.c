@@ -111,32 +111,20 @@ static int ingress_init(struct Qdisc *sch, struct nlattr *opt,
 	q->block_info.chain_head_change = clsact_chain_head_change;
 	q->block_info.chain_head_change_priv = &q->miniqp;
 
-	err = tcf_block_get_ext(&q->block, sch, &q->block_info, extack);
+	err = tcf_block_get_ext(&q->block, sch, &q->block_info,
+				q->flags & TCA_INGRESS_ATTR_FLAG_CACHEABLE,
+				extack);
 	if (err)
 		return err;
-
-	if (q->flags & TCA_INGRESS_ATTR_FLAG_CACHEABLE) {
-		err = tcf_block_create_e2e_cache(q->block);
-		if (err)
-			goto err_e2e;
-	}
 
 	mini_qdisc_pair_block_init(&q->miniqp, q->block);
 
 	return 0;
-
-err_e2e:
-	tcf_block_put_ext(q->block, sch, &q->block_info);
-	net_dec_ingress_queue();
-	return err;
 }
 
 static void ingress_destroy(struct Qdisc *sch)
 {
 	struct ingress_sched_data *q = qdisc_priv(sch);
-
-	if (q->flags & TCA_INGRESS_ATTR_FLAG_CACHEABLE)
-		tcf_block_destroy_e2e_cache(q->block);
 
 	tcf_block_put_ext(q->block, sch, &q->block_info);
 	net_dec_ingress_queue();
@@ -270,7 +258,7 @@ static int clsact_init(struct Qdisc *sch, struct nlattr *opt,
 	q->ingress_block_info.chain_head_change_priv = &q->miniqp_ingress;
 
 	err = tcf_block_get_ext(&q->ingress_block, sch, &q->ingress_block_info,
-				extack);
+				false, extack);
 	if (err)
 		return err;
 
@@ -282,7 +270,8 @@ static int clsact_init(struct Qdisc *sch, struct nlattr *opt,
 	q->egress_block_info.chain_head_change = clsact_chain_head_change;
 	q->egress_block_info.chain_head_change_priv = &q->miniqp_egress;
 
-	return tcf_block_get_ext(&q->egress_block, sch, &q->egress_block_info, extack);
+	return tcf_block_get_ext(&q->egress_block, sch, &q->egress_block_info,
+				 false, extack);
 }
 
 static void clsact_destroy(struct Qdisc *sch)

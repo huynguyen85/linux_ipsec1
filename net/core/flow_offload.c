@@ -494,13 +494,17 @@ void flow_indr_block_call(struct net_device *dev,
 {
 	struct flow_indr_block_cb *indr_block_cb;
 	struct flow_indr_block_dev *indr_dev;
+	enum tc_setup_type setup_type;
 
 	indr_dev = flow_indr_block_dev_lookup(dev);
 	if (!indr_dev)
 		return;
 
+	setup_type =
+		bo->binder_type == FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS_E2E ?
+				   TC_SETUP_E2E_BLOCK : TC_SETUP_BLOCK;
 	list_for_each_entry(indr_block_cb, &indr_dev->cb_list, list)
-		indr_block_cb->cb(dev, indr_block_cb->cb_priv, TC_SETUP_BLOCK,
+		indr_block_cb->cb(dev, indr_block_cb->cb_priv, setup_type,
 				  bo);
 }
 EXPORT_SYMBOL_GPL(flow_indr_block_call);

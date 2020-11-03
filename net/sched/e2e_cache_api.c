@@ -17,23 +17,37 @@ void e2e_cache_unregister_ops(void)
 }
 EXPORT_SYMBOL(e2e_cache_unregister_ops);
 
-struct tcf_e2e_cache *e2e_cache_create(struct tcf_chain *tcf_e2e_chain,
-				       struct tcf_proto *tp)
+struct tcf_e2e_cache *e2e_cache_create(struct Qdisc *q,
+				       enum flow_block_binder_type binder_type)
 {
 	request_module("e2e-cache");
 
 	if (!ops)
 		return NULL;
 
-	return ops->create(tcf_e2e_chain, tp);
+	return ops->create(q, binder_type);
 }
 
-void e2e_cache_destroy(struct tcf_e2e_cache *tcf_e2e_cache)
+void e2e_cache_destroy(struct tcf_e2e_cache *tcf_e2e_cache, struct Qdisc *q,
+		       enum flow_block_binder_type binder_type)
 {
 	if (!ops)
 		return;
 
-	return ops->destroy(tcf_e2e_cache);
+	return ops->destroy(tcf_e2e_cache, q, binder_type);
+}
+
+void e2e_cache_indr_cmd(struct tcf_e2e_cache *tcf_e2e_cache,
+			struct net_device *dev,
+			flow_indr_block_bind_cb_t *cb, void *cb_priv,
+			enum flow_block_command command,
+			enum flow_block_binder_type binder_type)
+{
+	if (!ops)
+		return;
+
+	return ops->indr_cmd(tcf_e2e_cache, dev, cb, cb_priv, command,
+			     binder_type);
 }
 
 void e2e_cache_trace_begin(struct tcf_e2e_cache *tcf_e2e_cache, struct sk_buff *skb)
@@ -105,3 +119,15 @@ int e2e_cache_classify(struct tcf_e2e_cache *tcf_e2e_cache,
 	return ops->classify(tcf_e2e_cache, skb, res);
 }
 EXPORT_SYMBOL(e2e_cache_classify);
+
+int e2e_cache_dump(struct tcf_e2e_cache *tcf_e2e_cache, struct sk_buff *skb,
+		   struct netlink_callback *cb, long index_start, long *index,
+		   bool terse_dump)
+{
+	if (!ops)
+		return -1;
+
+	return ops->dump(tcf_e2e_cache, skb, cb, index_start, index,
+			 terse_dump);
+}
+EXPORT_SYMBOL(e2e_cache_dump);

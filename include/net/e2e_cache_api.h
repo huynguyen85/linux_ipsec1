@@ -5,6 +5,7 @@
 
 #include <net/netfilter/nf_flow_table.h>
 #include <net/sch_generic.h>
+#include <linux/netlink.h>
 
 struct tcf_e2e_cache;
 
@@ -36,9 +37,11 @@ struct e2e_cache_trace_data {
 };
 
 struct e2e_cache_ops {
-	struct tcf_e2e_cache*	(*create)(struct tcf_chain *tcf_e2e_chain,
-					  struct tcf_proto *tp);
-	void			(*destroy)(struct tcf_e2e_cache *tcf_e2e_cache);
+	struct tcf_e2e_cache*	(*create)(struct Qdisc *q,
+					  enum flow_block_binder_type bt);
+	void			(*destroy)(struct tcf_e2e_cache *tcf_e2e_cache,
+					   struct Qdisc *q,
+					   enum flow_block_binder_type bt);
 	void			(*trace_begin)(struct tcf_e2e_cache *tcf_e2e_cache,
 					       struct sk_buff *skb);
 	void			(*trace_end)(struct sk_buff *skb, int classify_result);
@@ -54,14 +57,31 @@ struct e2e_cache_ops {
 	int			(*classify)(struct tcf_e2e_cache *tcf_e2e_cache,
 					    struct sk_buff *skb,
 					    struct tcf_result *res);
+	int			(*dump)(struct tcf_e2e_cache *tcf_e2e_cache,
+					struct sk_buff *skb,
+					struct netlink_callback *cb,
+					long index_start, long *index,
+					bool terse_dump);
+	void			(*indr_cmd)(struct tcf_e2e_cache *tcf_e2e_cache,
+					    struct net_device *dev,
+					    flow_indr_block_bind_cb_t *cb,
+					    void *cb_priv,
+					    enum flow_block_command command,
+					    enum flow_block_binder_type bt);
 };
 
 void e2e_cache_register_ops(struct e2e_cache_ops *e2e_cache_ops);
 void e2e_cache_unregister_ops(void);
 
-struct tcf_e2e_cache *e2e_cache_create(struct tcf_chain *tcf_e2e_chain,
-				       struct tcf_proto *tp);
-void e2e_cache_destroy(struct tcf_e2e_cache *tcf_e2e_cache);
+struct tcf_e2e_cache *e2e_cache_create(struct Qdisc *q,
+				       enum flow_block_binder_type binder_type);
+void e2e_cache_destroy(struct tcf_e2e_cache *tcf_e2e_cache, struct Qdisc *q,
+		       enum flow_block_binder_type binder_type);
+void e2e_cache_indr_cmd(struct tcf_e2e_cache *tcf_e2e_cache,
+			struct net_device *dev,
+			flow_indr_block_bind_cb_t *cb, void *cb_priv,
+			enum flow_block_command command,
+			enum flow_block_binder_type binder_type);
 
 void e2e_cache_trace_begin(struct tcf_e2e_cache *tcf_e2e_cache, struct sk_buff *skb);
 void e2e_cache_trace_end(struct sk_buff *skb, int classify_result);
@@ -77,5 +97,9 @@ void e2e_cache_filter_delete(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_pro
 void e2e_cache_filter_update_stats(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto *tp,
 				   void *fh);
 void e2e_cache_tp_destroy(struct tcf_e2e_cache *tcf_e2e_cache, struct tcf_proto *tp);
+
+int e2e_cache_dump(struct tcf_e2e_cache *tcf_e2e_cache, struct sk_buff *skb,
+		   struct netlink_callback *cb, long index_start, long *index,
+		   bool terse_dump);
 
 #endif /* __NET_E2E_CACHE_API_H */

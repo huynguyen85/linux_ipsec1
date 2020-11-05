@@ -87,6 +87,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(devlink_trap_report);
 
 static const struct nla_policy devlink_function_nl_policy[DEVLINK_PORT_FUNCTION_ATTR_MAX + 1] = {
 	[DEVLINK_PORT_FUNCTION_ATTR_HW_ADDR] = { .type = NLA_BINARY },
+	[DEVLINK_PORT_FUNCTION_ATTR_ROCE] = NLA_POLICY_RANGE(NLA_U8, 0, 1),
 	[DEVLINK_PORT_FUNCTION_ATTR_STATE] =
 		NLA_POLICY_RANGE(NLA_U8, DEVLINK_PORT_FUNCTION_STATE_INACTIVE,
 				 DEVLINK_PORT_FUNCTION_STATE_ACTIVE),
@@ -724,6 +725,31 @@ static int devlink_nl_port_attrs_put(struct sk_buff *msg,
 	return 0;
 }
 
+static int devlink_port_function_roce_fill(struct devlink *devlink, const struct devlink_ops *ops,
+					   struct devlink_port *port, struct sk_buff *msg,
+					   struct netlink_ext_ack *extack, bool *msg_updated)
+{
+	bool on;
+	int err;
+
+	if (!ops->port_function_roce_get)
+		return 0;
+
+	err = ops->port_function_roce_get(devlink, port, &on, extack);
+	if (err) {
+		if (err == -EOPNOTSUPP)
+			return 0;
+		return err;
+	}
+
+	err = nla_put_u8(msg, DEVLINK_PORT_FUNCTION_ATTR_ROCE, on);
+	if (err)
+		return err;
+
+	*msg_updated = true;
+	return 0;
+}
+
 static int
 devlink_port_function_hw_addr_fill(struct devlink *devlink, const struct devlink_ops *ops,
 				   struct devlink_port *port, struct sk_buff *msg,
@@ -822,6 +848,9 @@ devlink_nl_port_function_attrs_put(struct sk_buff *msg, struct devlink_port *por
 					       &msg_updated);
 	if (err)
 		goto out;
+
+	err = devlink_port_function_roce_fill(devlink, ops, port, msg, extack, &msg_updated);
+
 out:
 	if (err || !msg_updated)
 		nla_nest_cancel(msg, function_attr);
@@ -1055,6 +1084,24 @@ static int devlink_port_type_set(struct devlink *devlink,
 }
 
 static int
+devlink_port_function_roce_set(struct devlink *devlink, struct devlink_port *port,
+			       const struct nlattr *attr, struct netlink_ext_ack *extack)
+{
+	const struct devlink_ops *ops;
+	bool on;
+
+	on = nla_get_u8(attr);
+
+	ops = devlink->ops;
+	if (!ops->port_function_roce_set) {
+		NL_SET_ERR_MSG_MOD(extack, "Port doesn't support roce function attribute");
+		return -EOPNOTSUPP;
+	}
+
+	return ops->port_function_roce_set(devlink, port, on, extack);
+}
+
+static int
 devlink_port_function_hw_addr_set(struct devlink *devlink, struct devlink_port *port,
 				  const struct nlattr *attr, struct netlink_ext_ack *extack)
 {
@@ -1124,6 +1171,14 @@ devlink_port_function_set(struct devlink *devlink, struct devlink_port *port,
 		if (err)
 			return err;
 	}
+
+	attr = tb[DEVLINK_PORT_FUNCTION_ATTR_ROCE];
+	if (attr) {
+		err = devlink_port_function_roce_set(devlink, port, attr, extack);
+		if (err)
+			return err;
+	}
+
 	/* Keep this as the last function attribute set, so that when
 	 * multiple port function attributes are set along with state,
 	 * Those can be applied first before activating the state.

@@ -1425,6 +1425,24 @@ struct devlink_ops {
 	 */
 	int (*port_del)(struct devlink *devlink, unsigned int port_index,
 			struct netlink_ext_ack *extack);
+	/**
+	 * @port_function_roce_get: Port function's roce get function.
+	 *
+	 * Should be used by device drivers to report the roce state of a function managed
+	 * by the devlink port. Driver should return -EOPNOTSUPP if it doesn't support port
+	 * function handling for a particular port.
+	 */
+	int (*port_function_roce_get)(struct devlink *devlink, struct devlink_port *port,
+				      bool *on, struct netlink_ext_ack *extack);
+	/**
+	 * @port_function_roce_set: Port function's roce set function.
+	 *
+	 * Should be used by device drivers to enable/disable the roce state of a function managed
+	 * by the devlink port. Driver should return -EOPNOTSUPP if it doesn't support port
+	 * function handling for a particular port.
+	 */
+	int (*port_function_roce_set)(struct devlink *devlink, struct devlink_port *port,
+				      bool on, struct netlink_ext_ack *extack);
 };
 
 static inline void *devlink_priv(struct devlink *devlink)

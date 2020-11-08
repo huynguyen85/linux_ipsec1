@@ -240,6 +240,27 @@ release_idr:
 	return err;
 }
 
+static int tcf_vlan_clone(struct tc_action *new, struct tc_action *orig)
+{
+	struct tcf_vlan *vo = to_vlan(orig);
+	struct tcf_vlan *v = to_vlan(new);
+	struct tcf_vlan_params *po, *p;
+
+	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	if (!p)
+		return -ENOMEM;
+
+	po = rcu_dereference_protected(vo->vlan_p, lockdep_is_held(&vo->tcf_lock));
+
+	memcpy(p, po, sizeof(*p));
+
+	spin_lock_bh(&v->tcf_lock);
+	rcu_swap_protected(v->vlan_p, p, lockdep_is_held(&v->tcf_lock));
+	spin_unlock_bh(&v->tcf_lock);
+
+	return 0;
+}
+
 static void tcf_vlan_cleanup(struct tc_action *a)
 {
 	struct tcf_vlan *v = to_vlan(a);
@@ -334,12 +355,14 @@ static struct tc_action_ops act_vlan_ops = {
 	.act		=	tcf_vlan_act,
 	.dump		=	tcf_vlan_dump,
 	.init		=	tcf_vlan_init,
+	.clone		=	tcf_vlan_clone,
 	.cleanup	=	tcf_vlan_cleanup,
 	.walk		=	tcf_vlan_walker,
 	.stats_update	=	tcf_vlan_stats_update,
 	.get_fill_size	=	tcf_vlan_get_fill_size,
 	.lookup		=	tcf_vlan_search,
 	.size		=	sizeof(struct tcf_vlan),
+	.pernet_id	=	&vlan_net_id,
 };
 
 static __net_init int vlan_init_net(struct net *net)

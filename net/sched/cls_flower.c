@@ -27,6 +27,10 @@
 #include <net/netfilter/nf_conntrack.h>
 #include <net/act_api.h>
 #include <net/tc_act/tc_pedit.h>
+#include <net/tc_act/tc_vlan.h>
+#include <net/tc_act/tc_mirred.h>
+#include <net/tc_act/tc_gact.h>
+#include <net/tc_act/tc_tunnel_key.h>
 
 #include <net/dst.h>
 #include <net/dst_metadata.h>
@@ -2079,15 +2083,17 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 		    void **arg)
 {
 	struct e2e_cache_trace_entry *entry = &trace->entries[0];
-	struct cls_fl_filter *fnew, *last_f = NULL;
+	struct tc_action *clone_acts[TCA_ACT_MAX_PRIO];
 	struct netlink_ext_ack extack = {};
 	struct flow_offload_tuple *tuple;
+	struct cls_fl_filter *fnew;
 	struct tc_pedit_tmp *p_tmp;
 	struct fl_flow_mask *mask;
 	struct fl_flow_key *mkey;
+	struct net *net = NULL;
 	struct tc_action *act;
 	bool skip_hw = false;
-	struct net *net;
+	int clone_i = 0;
 	int err, i;
 
 	if (entry->type != E2E_CACHE_TRACE_CT)
@@ -2133,7 +2139,14 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 			skip_hw = true;
 
 		tcf_exts_for_each_action(j, act, &f->exts) {
-			if (is_tcf_pedit(act)) {
+			if (is_tcf_mirred_egress_redirect(act) ||
+			    is_tcf_mirred_egress_mirror(act) ||
+			    is_tcf_gact_shot(act) ||
+			    is_tcf_vlan(act) ||
+			    is_tcf_tunnel_set(act) ||
+			    is_tcf_tunnel_release(act)) {
+				clone_acts[clone_i++] = act;
+			} else if (is_tcf_pedit(act)) {
 				err = fl_merge_pedit(p_tmp, act);
 				if (err)
 					goto errout_mkey;
@@ -2156,15 +2169,15 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 			*dst++ |= (*src++ & tmp);
 		}
 
-		last_f = f;
+		if (!net)
+			net = f->exts.net;
 	}
 
-	if (!last_f) {
+	if (!net) {
 		err = -EINVAL;
 		goto errout_mkey;
 	}
 
-	net = last_f->exts.net;
 	err = alloc_fnew(net, &fnew);
 	if (err)
 		goto errout_mkey;
@@ -2196,12 +2209,10 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 	}
 
 	/* copy actions */
-	tcf_exts_for_each_action(i, act, &last_f->exts) {
+	for (i = 0; i < clone_i; i++) {
 		struct tc_action *clone;
 
-		if (is_tcf_pedit(act))
-			continue;
-
+		act = clone_acts[i];
 		clone = tcf_action_clone(net, tp, act);
 		if (IS_ERR(clone)) {
 			err = PTR_ERR(clone);

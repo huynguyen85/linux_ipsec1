@@ -97,6 +97,7 @@ struct e2e_cache_entry_node {
 			unsigned long cookie;
 
 			struct rhlist_head ct_node;
+			struct e2e_cache_entry_stats last_stats_ct;
 		};
 	};
 
@@ -1032,6 +1033,30 @@ e2e_cache_filter_update_stats_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 }
 
 static int
+e2e_cache_ft_stats_update_walk(const struct tcf_proto *tp, void *fh, unsigned long cookie,
+			       void *arg, struct e2e_cache_entry *entry,
+			       struct e2e_cache_entry_node *node)
+{
+	struct e2e_cache_entry_stats entry_stats_ct;
+	struct flow_stats *stats = arg;
+
+	e2e_cache_entry_update(entry->tcf_e2e_cache, entry);
+	entry_stats_ct.pkts = entry->entry_stats_hw.pkts + entry->entry_stats_sw.pkts;
+	entry_stats_ct.bytes = entry->entry_stats_hw.bytes + entry->entry_stats_sw.bytes;
+
+	// Report diff
+	stats->pkts += entry_stats_ct.pkts - node->last_stats_ct.pkts;
+	stats->bytes += entry_stats_ct.bytes - node->last_stats_ct.bytes;
+	stats->lastused = max_t(u64, stats->lastused, entry->lastused);
+
+	// Save for next diff
+	node->last_stats_ct.pkts = entry_stats_ct.pkts;
+	node->last_stats_ct.bytes = entry->entry_stats_hw.bytes;
+
+	return 0;
+}
+
+static int
 e2e_cache_entry_nf_ft_cb(enum tc_setup_type type, void *type_data, void *cb_priv)
 {
 	struct tcf_e2e_cache *tcf_e2e_cache = cb_priv;
@@ -1048,7 +1073,9 @@ e2e_cache_entry_nf_ft_cb(enum tc_setup_type type, void *type_data, void *cb_priv
 	case FLOW_CLS_REPLACE:
 		break;
 	case FLOW_CLS_STATS:
-		break;
+		err = e2e_cache_entries_walk(tcf_e2e_cache, NULL, NULL, cookie, &f->stats,
+					     &e2e_cache_ft_stats_update_walk);
+		return err > 0?  0 : -ENOENT;
 	case FLOW_CLS_DESTROY:
 		err = e2e_cache_entries_walk(tcf_e2e_cache, NULL, NULL, cookie, NULL,
 					     &e2e_cache_entry_unref);

@@ -122,8 +122,9 @@ struct mlx5_vport_info {
 	int                     link_state;
 	u32                     min_rate;
 	u32                     max_rate;
-	bool                    spoofchk;
-	bool                    trusted;
+	u8                      spoofchk: 1;
+	u8                      trusted: 1;
+	u8                      roce_enabled: 1;
 };
 
 /* Vport context events */
@@ -436,7 +437,10 @@ int mlx5_devlink_port_function_hw_addr_set(struct devlink *devlink,
 					   struct devlink_port *port,
 					   const u8 *hw_addr, int hw_addr_len,
 					   struct netlink_ext_ack *extack);
-
+int mlx5_devlink_port_function_roce_get(struct devlink *devlink, struct devlink_port *port,
+					bool *is_enabled, struct netlink_ext_ack *extack);
+int mlx5_devlink_port_function_roce_set(struct devlink *devlink, struct devlink_port *port,
+					bool enable, struct netlink_ext_ack *extack);
 void *mlx5_eswitch_get_uplink_priv(struct mlx5_eswitch *esw, u8 rep_type);
 
 int mlx5_eswitch_add_vlan_action(struct mlx5_eswitch *esw,

@@ -6,12 +6,20 @@
 #include <net/netfilter/nf_flow_table.h>
 #include <net/sch_generic.h>
 #include <linux/netlink.h>
+#include <linux/refcount.h>
 
-struct tcf_e2e_cache;
+struct e2e_cache_entry;
 
 enum e2e_cache_trace_type {
 	E2E_CACHE_TRACE_TP,
 	E2E_CACHE_TRACE_CT,
+};
+
+struct tcf_e2e_cache {
+	refcount_t refcnt;
+	struct tcf_block *block;
+	struct e2e_cache_entry *entry;
+	struct rcu_head rcu;
 };
 
 struct e2e_cache_trace_entry {
@@ -39,9 +47,10 @@ struct e2e_cache_trace_data {
 struct e2e_cache_ops {
 	struct tcf_e2e_cache*	(*create)(struct Qdisc *q,
 					  enum flow_block_binder_type bt);
-	void			(*destroy)(struct tcf_e2e_cache *tcf_e2e_cache,
-					   struct Qdisc *q,
-					   enum flow_block_binder_type bt);
+	void			(*detach)(struct tcf_e2e_cache *tcf_e2e_cache,
+					  struct Qdisc *q,
+					  enum flow_block_binder_type bt);
+	void			(*destroy)(struct tcf_e2e_cache *tcf_e2e_cache);
 	void			(*trace_begin)(struct tcf_e2e_cache *tcf_e2e_cache,
 					       struct sk_buff *skb);
 	void			(*trace_end)(struct sk_buff *skb, int classify_result);
@@ -73,10 +82,21 @@ struct e2e_cache_ops {
 void e2e_cache_register_ops(struct e2e_cache_ops *e2e_cache_ops);
 void e2e_cache_unregister_ops(void);
 
-struct tcf_e2e_cache *e2e_cache_create(struct Qdisc *q,
-				       enum flow_block_binder_type binder_type);
-void e2e_cache_destroy(struct tcf_e2e_cache *tcf_e2e_cache, struct Qdisc *q,
-		       enum flow_block_binder_type binder_type);
+struct tcf_e2e_cache *
+e2e_cache_deref_rcu(struct tcf_e2e_cache __rcu **tcf_e2e_cache);
+struct tcf_e2e_cache *
+e2e_cache_deref_protected(struct tcf_e2e_cache __rcu **tcf_e2e_cache);
+bool e2e_cache_get(struct tcf_e2e_cache *tcf_e2e_cache);
+void e2e_cache_put(struct tcf_e2e_cache *tcf_e2e_cache);
+struct tcf_e2e_cache *
+e2e_cache_deref_get(struct tcf_e2e_cache __rcu **tcf_e2e_cache);
+
+int e2e_cache_create(struct tcf_e2e_cache __rcu **tcf_e2e_cache,
+		     struct Qdisc *q,
+		     enum flow_block_binder_type binder_type);
+void e2e_cache_detach(struct tcf_e2e_cache __rcu **tcf_e2e_cache,
+		      struct Qdisc *q,
+		      enum flow_block_binder_type binder_type);
 void e2e_cache_indr_cmd(struct tcf_e2e_cache *tcf_e2e_cache,
 			struct net_device *dev,
 			flow_indr_block_bind_cb_t *cb, void *cb_priv,

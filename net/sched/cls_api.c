@@ -300,8 +300,13 @@ EXPORT_SYMBOL(tcf_proto_get_not_zero);
 static void tcf_proto_destroy(struct tcf_proto *tp, bool rtnl_held,
 			      bool sig_destroy, struct netlink_ext_ack *extack)
 {
-	if (tp->chain->block->tcf_e2e_cache)
-		e2e_cache_tp_destroy(tp->chain->block->tcf_e2e_cache, tp);
+	struct tcf_e2e_cache *e2e_cache =
+		e2e_cache_deref_get(&tp->chain->block->tcf_e2e_cache);
+
+	if (e2e_cache) {
+		e2e_cache_tp_destroy(e2e_cache, tp);
+		e2e_cache_put(e2e_cache);
+	}
 
 	tp->ops->destroy(tp, rtnl_held, extack);
 	if (sig_destroy)
@@ -702,14 +707,17 @@ static void tc_indr_block_get_and_cmd(struct net_device *dev,
 				      void *cb_priv,
 				      enum flow_block_command command)
 {
+	struct tcf_e2e_cache *e2e_cache;
 	struct tcf_block *block;
 
 	block = tc_dev_block(dev, true);
 	tc_indr_block_cmd(dev, block, cb, cb_priv, command,
 			  FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS);
-	if (block && block->tcf_e2e_cache)
-		e2e_cache_indr_cmd(block->tcf_e2e_cache, dev, cb, cb_priv,
-				   command,
+	e2e_cache = block ?
+		e2e_cache_deref_protected(&block->tcf_e2e_cache) :
+		NULL;
+	if (e2e_cache)
+		e2e_cache_indr_cmd(e2e_cache, dev, cb, cb_priv, command,
 				   FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS);
 
 	block = tc_dev_block(dev, false);
@@ -884,6 +892,14 @@ tcf_chain0_head_change_cb_del(struct tcf_block *block,
 	struct tcf_filter_chain_list_item *item;
 
 	mutex_lock(&block->lock);
+	/* Block has already been detached from all devices and last reference
+	 * is being released (only e2e cache atm).
+	 */
+	if (list_empty(&block->chain0.filter_chain_list)) {
+		mutex_unlock(&block->lock);
+		return;
+	}
+
 	list_for_each_entry(item, &block->chain0.filter_chain_list, list) {
 		if ((!ei->chain_head_change && !ei->chain_head_change_priv) ||
 		    (item->chain_head_change == ei->chain_head_change &&
@@ -993,6 +1009,12 @@ static struct tcf_block *tcf_block_refcnt_get(struct net *net, u64 block_index)
 
 	return block;
 }
+
+void tcf_block_hold(struct tcf_block *block)
+{
+	refcount_inc(&block->refcnt);
+}
+EXPORT_SYMBOL(tcf_block_hold);
 
 static struct tcf_chain *
 __tcf_get_next_chain(struct tcf_block *block, struct tcf_chain *chain)
@@ -1209,25 +1231,14 @@ static int __tcf_qdisc_cl_find(struct Qdisc *q, u32 parent, unsigned long *cl,
 static int tcf_block_create_e2e_cache(struct tcf_block *block, struct Qdisc *q,
 				      enum flow_block_binder_type binder_type)
 {
-	struct tcf_e2e_cache *tcf_e2e_cache;
-
-	tcf_e2e_cache = e2e_cache_create(q, binder_type);
-	if (IS_ERR(tcf_e2e_cache))
-		return PTR_ERR(tcf_e2e_cache);
-
-	block->tcf_e2e_cache = tcf_e2e_cache;
-	return 0;
+	return e2e_cache_create(&block->tcf_e2e_cache, q, binder_type);
 }
 
-static void tcf_block_destroy_e2e_cache(struct tcf_block *block,
-					struct Qdisc *q,
-					enum flow_block_binder_type binder_type)
+static void tcf_block_detach_e2e_cache(struct tcf_block *block,
+				       struct Qdisc *q,
+				       enum flow_block_binder_type binder_type)
 {
-	if (!block->tcf_e2e_cache)
-		return;
-
-	e2e_cache_destroy(block->tcf_e2e_cache, q, binder_type);
-	block->tcf_e2e_cache = NULL;
+	e2e_cache_detach(&block->tcf_e2e_cache, q, binder_type);
 }
 
 static struct tcf_block *__tcf_block_find(struct net *net, struct Qdisc *q,
@@ -1284,7 +1295,7 @@ static void __tcf_block_put(struct tcf_block *block, struct Qdisc *q,
 			tcf_block_remove(block, block->net);
 
 		if (q) {
-			tcf_block_destroy_e2e_cache(block, q, ei->binder_type);
+			tcf_block_detach_e2e_cache(block, q, ei->binder_type);
 			tcf_block_offload_unbind(block, q, ei);
 		}
 
@@ -1293,7 +1304,7 @@ static void __tcf_block_put(struct tcf_block *block, struct Qdisc *q,
 		else
 			tcf_block_flush_all_chains(block, rtnl_held);
 	} else if (q) {
-		tcf_block_destroy_e2e_cache(block, q, ei->binder_type);
+		tcf_block_detach_e2e_cache(block, q, ei->binder_type);
 		tcf_block_offload_unbind(block, q, ei);
 	}
 }
@@ -1403,6 +1414,12 @@ static void tcf_block_owner_del(struct tcf_block *block,
 				enum flow_block_binder_type binder_type)
 {
 	struct tcf_block_owner_item *item;
+
+	/* Block has already been detached from all owners and last reference is
+	 * being released (only e2e cache atm).
+	 */
+	if (list_empty(&block->owner_list))
+		return;
 
 	list_for_each_entry(item, &block->owner_list, list) {
 		if (item->q == q && item->binder_type == binder_type) {
@@ -1655,19 +1672,15 @@ static inline int __tcf_classify(struct sk_buff *skb,
 				 const struct tcf_proto *orig_tp,
 				 struct tcf_result *res,
 				 bool compat_mode,
-				 u32 *last_executed_chain)
+				 u32 *last_executed_chain,
+				 struct tcf_e2e_cache *e2e_cache)
 {
 #ifdef CONFIG_NET_CLS_ACT
-	struct tcf_e2e_cache *e2e_cache = NULL;
 	const struct tcf_proto *first_tp;
 	int limit = 0;
 
-	if (tp && tp->chain->block->tcf_e2e_cache) {
-		int err;
-
-		e2e_cache = tp->chain->block->tcf_e2e_cache;
-		err = e2e_cache_classify(e2e_cache, skb, res);
-
+	if (e2e_cache) {
+		int err = e2e_cache_classify(e2e_cache, skb, res);
 		if (err >= 0)
 			return err;
 	}
@@ -1723,7 +1736,7 @@ int tcf_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 	u32 last_executed_chain = 0;
 
 	return __tcf_classify(skb, tp, tp, res, compat_mode,
-			      &last_executed_chain);
+			      &last_executed_chain, NULL);
 }
 EXPORT_SYMBOL(tcf_classify);
 
@@ -1736,10 +1749,11 @@ int tcf_classify_ingress(struct sk_buff *skb,
 	u32 last_executed_chain = 0;
 
 	return __tcf_classify(skb, tp, tp, res, compat_mode,
-			      &last_executed_chain);
+			      &last_executed_chain, NULL);
 #else
 	u32 last_executed_chain = tp ? tp->chain->index : 0;
 	const struct tcf_proto *orig_tp = tp;
+	struct tcf_e2e_cache *e2e_cache;
 	struct tc_skb_ext *ext;
 	int ret;
 
@@ -1759,13 +1773,16 @@ int tcf_classify_ingress(struct sk_buff *skb,
 		last_executed_chain = fchain->index;
 	}
 
-	if (tp && tp->chain->block->tcf_e2e_cache)
-		e2e_cache_trace_begin(tp->chain->block->tcf_e2e_cache, skb);
+	e2e_cache = tp ?
+		e2e_cache_deref_rcu(&tp->chain->block->tcf_e2e_cache) :
+		NULL;
+	if (e2e_cache)
+		e2e_cache_trace_begin(e2e_cache, skb);
 
 	ret = __tcf_classify(skb, tp, orig_tp, res, compat_mode,
-			     &last_executed_chain);
+			     &last_executed_chain, e2e_cache);
 
-	if (tp && tp->chain->block->tcf_e2e_cache)
+	if (e2e_cache)
 		e2e_cache_trace_end(skb, ret);
 
 	/* If we missed on some chain */
@@ -2024,11 +2041,17 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 		}
 	} else {
 		if (tp->ops->dump) {
-		   if (tp->chain->block->tcf_e2e_cache)
-			e2e_cache_filter_update_stats(tp->chain->block->tcf_e2e_cache, tp, fh);
+			struct tcf_e2e_cache *e2e_cache =
+				e2e_cache_deref_get(&tp->chain->block->tcf_e2e_cache);
 
-		   if (tp->ops->dump(net, tp, fh, skb, tcm, rtnl_held) < 0)
-			goto nla_put_failure;
+			if (e2e_cache) {
+				e2e_cache_filter_update_stats(e2e_cache, tp,
+							      fh);
+				e2e_cache_put(e2e_cache);
+			}
+
+			if (tp->ops->dump(net, tp, fh, skb, tcm, rtnl_held) < 0)
+				goto nla_put_failure;
 		}
 	}
 	nlh->nlmsg_len = skb_tail_pointer(skb) - b;
@@ -2080,6 +2103,8 @@ static int tfilter_del_notify(struct net *net, struct sk_buff *oskb,
 			      bool rtnl_held, struct netlink_ext_ack *extack)
 {
 	struct sk_buff *skb;
+	struct tcf_e2e_cache *e2e_cache =
+		e2e_cache_deref_get(&tp->chain->block->tcf_e2e_cache);
 	u32 portid = oskb ? NETLINK_CB(oskb).portid : 0;
 	int err;
 
@@ -2095,8 +2120,11 @@ static int tfilter_del_notify(struct net *net, struct sk_buff *oskb,
 		return -EINVAL;
 	}
 
-	if (tp->chain->block->tcf_e2e_cache)
-		e2e_cache_filter_delete(tp->chain->block->tcf_e2e_cache, tp, fh);
+	if (e2e_cache) {
+		e2e_cache_filter_delete(e2e_cache, tp, fh);
+		e2e_cache_put(e2e_cache);
+	}
+
 	err = tp->ops->delete(tp, fh, last, rtnl_held, extack);
 	if (err) {
 		kfree_skb(skb);
@@ -2823,10 +2851,14 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 				break;
 			}
 		}
-	} else if (block->tcf_e2e_cache &&
-		   (!tca[TCA_CHAIN] || nla_get_u32(tca[TCA_CHAIN]) == 0)) {
-		err = e2e_cache_dump(block->tcf_e2e_cache, skb, cb,
-				     index_start, &index, terse_dump);
+	} else {
+		struct tcf_e2e_cache *e2e_cache =
+			e2e_cache_deref_protected(&block->tcf_e2e_cache);
+
+		if (e2e_cache &&
+		    (!tca[TCA_CHAIN] || nla_get_u32(tca[TCA_CHAIN]) == 0))
+			err = e2e_cache_dump(e2e_cache, skb, cb,
+					     index_start, &index, terse_dump);
 	}
 
 	if (tcm->tcm_ifindex == TCM_IFINDEX_MAGIC_BLOCK)

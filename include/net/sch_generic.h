@@ -447,7 +447,7 @@ struct tcf_block {
 	DECLARE_HASHTABLE(proto_destroy_ht, 7);
 	struct mutex proto_destroy_lock; /* Lock for proto_destroy hashtable. */
 
-	struct tcf_e2e_cache *tcf_e2e_cache;
+	struct tcf_e2e_cache __rcu *tcf_e2e_cache;
 };
 
 #ifdef CONFIG_PROVE_LOCKING

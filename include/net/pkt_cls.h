@@ -78,6 +78,7 @@ struct tcf_proto *tcf_get_next_proto(struct tcf_chain *chain,
 void tcf_proto_put(struct tcf_proto *tp, bool rtnl_held,
 		   struct netlink_ext_ack *extack);
 void tcf_block_netif_keep_dst(struct tcf_block *block);
+void tcf_block_hold(struct tcf_block *block);
 int tcf_block_get(struct tcf_block **p_block,
 		  struct tcf_proto __rcu **p_filter_chain, struct Qdisc *q,
 		  struct netlink_ext_ack *extack);

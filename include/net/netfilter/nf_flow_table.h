@@ -220,9 +220,11 @@ nf_flow_table_offload_del_cb(struct nf_flowtable *flow_table,
 int flow_offload_route_init(struct flow_offload *flow,
 			    const struct nf_flow_route *route);
 
-int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow);
+int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow,
+		     enum flow_offload_tuple_dir dir);
 void flow_offload_refresh(struct nf_flowtable *flow_table,
-			  struct flow_offload *flow);
+			  struct flow_offload *flow,
+			  enum flow_offload_tuple_dir dir);
 
 struct flow_offload *flow_offload_lookup(struct nf_flowtable *flow_table,
 					 struct flow_offload_tuple *tuple,
@@ -254,7 +256,8 @@ unsigned int nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 	MODULE_ALIAS("nf-flowtable-" __stringify(family))
 
 void nf_flow_offload_add(struct nf_flowtable *flowtable,
-			 struct flow_offload *flow);
+			 struct flow_offload *flow,
+			 enum flow_offload_tuple_dir dir);
 void nf_flow_offload_del(struct nf_flowtable *flowtable,
 			 struct flow_offload *flow);
 void nf_flow_offload_stats(struct nf_flowtable *flowtable,

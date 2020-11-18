@@ -21,6 +21,7 @@ struct flow_offload_work {
 	struct nf_flowtable	*flowtable;
 	struct flow_offload	*flow;
 	struct work_struct	work;
+	enum flow_offload_tuple_dir dir;
 };
 
 #define NF_FLOW_DISSECTOR(__match, __type, __field)	\
@@ -615,7 +616,7 @@ err_flow:
 	return NULL;
 }
 
-static void __nf_flow_offload_destroy(struct nf_flow_rule *flow_rule)
+static void nf_flow_offload_destroy(struct nf_flow_rule *flow_rule)
 {
 	struct flow_action_entry *entry;
 	int i;
@@ -631,30 +632,14 @@ static void __nf_flow_offload_destroy(struct nf_flow_rule *flow_rule)
 	kfree(flow_rule);
 }
 
-static void nf_flow_offload_destroy(struct nf_flow_rule *flow_rule[])
-{
-	int i;
-
-	for (i = 0; i < FLOW_OFFLOAD_DIR_MAX; i++)
-		__nf_flow_offload_destroy(flow_rule[i]);
-}
-
 static int nf_flow_offload_alloc(const struct flow_offload_work *offload,
-				 struct nf_flow_rule *flow_rule[])
+				 struct nf_flow_rule **flow_rule)
 {
 	struct net *net = read_pnet(&offload->flowtable->net);
 
-	flow_rule[0] = nf_flow_offload_rule_alloc(net, offload,
-						  FLOW_OFFLOAD_DIR_ORIGINAL);
-	if (!flow_rule[0])
+	*flow_rule = nf_flow_offload_rule_alloc(net, offload, offload->dir);
+	if (!*flow_rule)
 		return -ENOMEM;
-
-	flow_rule[1] = nf_flow_offload_rule_alloc(net, offload,
-						  FLOW_OFFLOAD_DIR_REPLY);
-	if (!flow_rule[1]) {
-		__nf_flow_offload_destroy(flow_rule[0]);
-		return -ENOMEM;
-	}
 
 	return 0;
 }
@@ -727,14 +712,11 @@ static void flow_offload_tuple_del(struct flow_offload_work *offload,
 }
 
 static int flow_offload_rule_add(struct flow_offload_work *offload,
-				 struct nf_flow_rule *flow_rule[])
+				 struct nf_flow_rule *flow_rule)
 {
 	int ok_count = 0;
 
-	ok_count += flow_offload_tuple_add(offload, flow_rule[0],
-					   FLOW_OFFLOAD_DIR_ORIGINAL);
-	ok_count += flow_offload_tuple_add(offload, flow_rule[1],
-					   FLOW_OFFLOAD_DIR_REPLY);
+	ok_count += flow_offload_tuple_add(offload, flow_rule, offload->dir);
 	if (ok_count == 0)
 		return -ENOENT;
 
@@ -743,20 +725,20 @@ static int flow_offload_rule_add(struct flow_offload_work *offload,
 
 static void flow_offload_work_add(struct flow_offload_work *offload)
 {
-	struct nf_flow_rule *flow_rule[FLOW_OFFLOAD_DIR_MAX];
+	struct nf_flow_rule *flow_rule;
 	int err;
 
-	err = nf_flow_offload_alloc(offload, flow_rule);
+	err = nf_flow_offload_alloc(offload, &flow_rule);
 	if (err < 0)
 		return;
 
 	err = flow_offload_rule_add(offload, flow_rule);
-	if (err < 0)
-		set_bit(NF_FLOW_HW_REFRESH, &offload->flow->flags);
-	else
+	if (!err)
 		set_bit(IPS_HW_OFFLOAD_BIT, &offload->flow->ct->status);
 
 	nf_flow_offload_destroy(flow_rule);
+
+	set_bit(NF_FLOW_HW_REFRESH, &offload->flow->flags);
 }
 
 static void flow_offload_work_del(struct flow_offload_work *offload)
@@ -847,7 +829,8 @@ nf_flow_offload_work_alloc(struct nf_flowtable *flowtable,
 
 
 void nf_flow_offload_add(struct nf_flowtable *flowtable,
-			 struct flow_offload *flow)
+			 struct flow_offload *flow,
+			 enum flow_offload_tuple_dir dir)
 {
 	struct flow_offload_work *offload;
 
@@ -855,6 +838,7 @@ void nf_flow_offload_add(struct nf_flowtable *flowtable,
 	if (!offload)
 		return;
 
+	offload->dir = dir;
 	flow_offload_queue_work(offload);
 }
 

@@ -350,8 +350,8 @@ static void tcf_ct_flow_table_add(struct tcf_ct_flow_table *ct_ft,
 				  enum ip_conntrack_info ctinfo,
 				  bool tcp)
 {
+	enum flow_offload_tuple_dir dir;
 	struct flow_offload *entry;
-	int dir;
 	int err;
 
 	if (test_and_set_bit(IPS_OFFLOAD_BIT, &ct->status))
@@ -368,11 +368,11 @@ static void tcf_ct_flow_table_add(struct tcf_ct_flow_table *ct_ft,
 		ct->proto.tcp.seen[1].flags |= IP_CT_TCP_FLAG_BE_LIBERAL;
 	}
 
-	err = flow_offload_add(&ct_ft->nf_ft, entry);
+	dir = (ctinfo == IP_CT_IS_REPLY ? FLOW_OFFLOAD_DIR_REPLY : FLOW_OFFLOAD_DIR_ORIGINAL);
+	err = flow_offload_add(&ct_ft->nf_ft, entry, dir);
 	if (err)
 		goto err_add;
 
-	dir = (ctinfo == IP_CT_IS_REPLY ? FLOW_OFFLOAD_DIR_REPLY : FLOW_OFFLOAD_DIR_ORIGINAL);
 	e2e_cache_trace_ct(&ct_ft->nf_ft, entry, dir);
 	flow_offload_put(entry);
 
@@ -545,7 +545,7 @@ static bool tcf_ct_flow_table_lookup(struct tcf_ct_params *p,
 	ctinfo = dir == FLOW_OFFLOAD_DIR_ORIGINAL ? IP_CT_ESTABLISHED :
 						    IP_CT_ESTABLISHED_REPLY;
 
-	flow_offload_refresh(nf_ft, flow);
+	flow_offload_refresh(nf_ft, flow, dir);
 	nf_conntrack_get(&ct->ct_general);
 	nf_ct_set(skb, ct, ctinfo);
 

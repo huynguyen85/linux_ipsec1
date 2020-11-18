@@ -236,7 +236,8 @@ static const struct rhashtable_params nf_flow_offload_rhash_params = {
 	.automatic_shrinking	= true,
 };
 
-int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow)
+int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow,
+		     enum flow_offload_tuple_dir dir)
 {
 	int err;
 
@@ -262,7 +263,7 @@ int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow)
 
 	if (nf_flowtable_hw_offload(flow_table)) {
 		__set_bit(NF_FLOW_HW, &flow->flags);
-		nf_flow_offload_add(flow_table, flow);
+		nf_flow_offload_add(flow_table, flow, dir);
 	}
 
 	return 0;
@@ -277,7 +278,8 @@ err_insert_1:
 EXPORT_SYMBOL_GPL(flow_offload_add);
 
 void flow_offload_refresh(struct nf_flowtable *flow_table,
-			  struct flow_offload *flow)
+			  struct flow_offload *flow,
+			  enum flow_offload_tuple_dir dir)
 {
 	flow->timeout = nf_flowtable_time_stamp +
 			nf_flow_offload_timeout(flow_table);
@@ -286,7 +288,7 @@ void flow_offload_refresh(struct nf_flowtable *flow_table,
 		   !test_and_clear_bit(NF_FLOW_HW_REFRESH, &flow->flags)))
 		return;
 
-	nf_flow_offload_add(flow_table, flow);
+	nf_flow_offload_add(flow_table, flow, dir);
 }
 EXPORT_SYMBOL_GPL(flow_offload_refresh);
 

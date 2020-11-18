@@ -73,6 +73,7 @@ static void nft_flow_offload_eval(const struct nft_expr *expr,
 {
 	struct nft_flow_offload *priv = nft_expr_priv(expr);
 	struct nf_flowtable *flowtable = &priv->flowtable->data;
+	enum flow_offload_tuple_dir offload_dir;
 	struct tcphdr _tcph, *tcph = NULL;
 	enum ip_conntrack_info ctinfo;
 	struct nf_flow_route route;
@@ -127,7 +128,9 @@ static void nft_flow_offload_eval(const struct nft_expr *expr,
 		ct->proto.tcp.seen[1].flags |= IP_CT_TCP_FLAG_BE_LIBERAL;
 	}
 
-	ret = flow_offload_add(flowtable, flow);
+	offload_dir = (dir == IP_CT_DIR_ORIGINAL ?
+			      FLOW_OFFLOAD_DIR_ORIGINAL : FLOW_OFFLOAD_DIR_REPLY);
+	ret = flow_offload_add(flowtable, flow, offload_dir);
 	if (ret < 0)
 		goto err_flow_add;
 

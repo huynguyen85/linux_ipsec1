@@ -191,7 +191,7 @@ static int mlx5_create_ipsec_obj(struct mlx5_core_dev *mdev,
 		MLX5_SET(ipsec_obj, obj, full_offload, 1);
 		aso_ctx = MLX5_ADDR_OF(ipsec_obj, obj, ipsec_aso);
 		MLX5_SET(ipsec_aso, aso_ctx, valid, 1);
-		MLX5_SET(ipsec_obj, obj, aso_return_reg, MLX5_IPSEC_ASO_REG_C_4_5);
+		//MLX5_SET(ipsec_obj, obj, aso_return_reg, MLX5_IPSEC_ASO_REG_C_4_5);
 		if (attrs->is_tx)
 			MLX5_SET(ipsec_aso, aso_ctx, mode, MLX5_IPSEC_ASO_INC_SN);
 	}

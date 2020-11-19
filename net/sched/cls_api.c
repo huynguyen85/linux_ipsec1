@@ -1234,6 +1234,12 @@ static int tcf_block_create_e2e_cache(struct tcf_block *block, struct Qdisc *q,
 	return e2e_cache_create(&block->tcf_e2e_cache, q, binder_type);
 }
 
+static int tcf_block_attach_e2e_cache(struct tcf_block *block, struct Qdisc *q,
+				      enum flow_block_binder_type binder_type)
+{
+	return e2e_cache_attach(&block->tcf_e2e_cache, q, binder_type);
+}
+
 static void tcf_block_detach_e2e_cache(struct tcf_block *block,
 				       struct Qdisc *q,
 				       enum flow_block_binder_type binder_type)
@@ -1440,9 +1446,14 @@ int tcf_block_get_ext(struct tcf_block **p_block, struct Qdisc *q,
 	bool created = false;
 	int err;
 
-	if (ei->block_index)
+	if (ei->block) {
+		/* get existing block provided by caller */
+		block = ei->block;
+		tcf_block_hold(block);
+	} else if (ei->block_index) {
 		/* block_index not 0 means the shared block is requested */
 		block = tcf_block_refcnt_get(net, ei->block_index);
+	}
 
 	if (!block) {
 		block = tcf_block_create(net, q, ei->block_index, extack);
@@ -1470,9 +1481,19 @@ int tcf_block_get_ext(struct tcf_block **p_block, struct Qdisc *q,
 	if (err)
 		goto err_block_offload_bind;
 
-	if (cache && created) {
-		err = tcf_block_create_e2e_cache(block, q, ei->binder_type);
-		if (err)
+	if (created) {
+		if (cache) {
+			err = tcf_block_create_e2e_cache(block, q,
+							 ei->binder_type);
+			if (err)
+				goto err_block_cache_create;
+		}
+	} else {
+		err = tcf_block_attach_e2e_cache(block, q, ei->binder_type);
+		/* Only error out if user explicitly requested e2e cache on
+		 * shared block.
+		 */
+		if (err && cache)
 			goto err_block_cache_create;
 	}
 

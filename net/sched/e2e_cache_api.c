@@ -75,8 +75,23 @@ e2e_cache_create(struct tcf_e2e_cache __rcu **tcf_e2e_cache,
 	if (IS_ERR(e2e_cache))
 		return PTR_ERR(e2e_cache);
 
+	e2e_cache->attachcnt++;
 	RCU_INIT_POINTER(*tcf_e2e_cache, e2e_cache);
 	return 0;
+}
+
+int e2e_cache_attach(struct tcf_e2e_cache __rcu **tcf_e2e_cache,
+		     struct Qdisc *q,
+		     enum flow_block_binder_type binder_type)
+{
+	struct tcf_e2e_cache *e2e_cache = rtnl_dereference(*tcf_e2e_cache);
+
+	if (!ops || !e2e_cache)
+		return -ENOTSUPP;
+
+	WARN_ON(!e2e_cache_get(e2e_cache));
+	e2e_cache->attachcnt++;
+	return ops->attach(e2e_cache, q, binder_type);
 }
 
 void e2e_cache_detach(struct tcf_e2e_cache __rcu **tcf_e2e_cache,
@@ -88,7 +103,8 @@ void e2e_cache_detach(struct tcf_e2e_cache __rcu **tcf_e2e_cache,
 	if (!ops || !e2e_cache)
 		return;
 
-	RCU_INIT_POINTER(*tcf_e2e_cache, NULL);
+	if (!--e2e_cache->attachcnt)
+		RCU_INIT_POINTER(*tcf_e2e_cache, NULL);
 	ops->detach(e2e_cache, q, binder_type);
 	e2e_cache_put(e2e_cache);
 }

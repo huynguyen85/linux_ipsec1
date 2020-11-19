@@ -17,6 +17,7 @@ enum e2e_cache_trace_type {
 
 struct tcf_e2e_cache {
 	refcount_t refcnt;
+	int attachcnt;
 	struct tcf_block *block;
 	struct rhltable tp_rhl;
 	struct rhltable tp_fh_rhl;
@@ -53,6 +54,9 @@ struct e2e_cache_trace_data {
 
 struct e2e_cache_ops {
 	struct tcf_e2e_cache*	(*create)(struct Qdisc *q,
+					  enum flow_block_binder_type bt);
+	int			(*attach)(struct tcf_e2e_cache *tcf_e2e_cache,
+					  struct Qdisc *q,
 					  enum flow_block_binder_type bt);
 	void			(*detach)(struct tcf_e2e_cache *tcf_e2e_cache,
 					  struct Qdisc *q,
@@ -101,6 +105,9 @@ struct tcf_e2e_cache *
 e2e_cache_deref_get(struct tcf_e2e_cache __rcu **tcf_e2e_cache);
 
 int e2e_cache_create(struct tcf_e2e_cache __rcu **tcf_e2e_cache,
+		     struct Qdisc *q,
+		     enum flow_block_binder_type binder_type);
+int e2e_cache_attach(struct tcf_e2e_cache __rcu **tcf_e2e_cache,
 		     struct Qdisc *q,
 		     enum flow_block_binder_type binder_type);
 void e2e_cache_detach(struct tcf_e2e_cache __rcu **tcf_e2e_cache,

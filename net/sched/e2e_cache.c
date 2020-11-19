@@ -1222,6 +1222,27 @@ err_tp_rhl:
 	return ERR_PTR(err);
 }
 
+static int
+e2e_cache_attach_impl(struct tcf_e2e_cache *tcf_e2e_cache, struct Qdisc *q,
+		      enum flow_block_binder_type binder_type)
+{
+	struct tcf_block_ext_info ei = {
+		.chain_head_change_priv = q,
+		.block = tcf_e2e_cache->block,
+	};
+	struct tcf_block *block;
+	int err;
+
+	if (binder_type == FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS)
+		ei.binder_type = FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS_E2E;
+	else
+		return -EOPNOTSUPP;
+
+	err = tcf_block_get_ext(&block, q, &ei, false, NULL);
+	pr_debug("Cache attached attachcnt=%d\n", tcf_e2e_cache->attachcnt);
+	return err;
+}
+
 static void
 e2e_cache_detach_impl(struct tcf_e2e_cache *tcf_e2e_cache, struct Qdisc *q,
 		      enum flow_block_binder_type binder_type)
@@ -1237,7 +1258,7 @@ e2e_cache_detach_impl(struct tcf_e2e_cache *tcf_e2e_cache, struct Qdisc *q,
 		WARN_ON(1);
 
 	tcf_block_put_ext(tcf_e2e_cache->block, q, &ei);
-	pr_debug("Cache detached\n");
+	pr_debug("Cache detached attachcnt=%d\n", tcf_e2e_cache->attachcnt);
 }
 
 static void
@@ -1327,6 +1348,7 @@ static int e2e_cache_dump_impl(struct tcf_e2e_cache *tcf_e2e_cache,
 
 static struct e2e_cache_ops e2e_cache_ops = {
 	.create		= e2e_cache_create_impl,
+	.attach		= e2e_cache_attach_impl,
 	.detach		= e2e_cache_detach_impl,
 	.destroy	= e2e_cache_destroy_impl,
 	.trace_begin	= e2e_cache_trace_begin_impl,

@@ -30,6 +30,7 @@ struct tcf_block_ext_info {
 	tcf_chain_head_change_t *chain_head_change;
 	void *chain_head_change_priv;
 	u64 block_index;
+	struct tcf_block *block;
 };
 
 #define TCF_BLOCK_E2E_CACHE U64_MAX

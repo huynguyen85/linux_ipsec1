@@ -170,6 +170,7 @@ struct mlx5e_tc_attr_to_reg_mapping mlx5e_tc_attr_to_reg_mappings[] = {
 		.mlen = 3,
 		.soffset = MLX5_BYTE_OFF(fte_match_param,
 					 misc_parameters_2.metadata_reg_c_1),
+		.excluded_bits = 1, /* Taken by IPsec */
 	},
 	[ZONE_TO_REG] = zone_to_reg_ct,
 	[ZONE_RESTORE_TO_REG] = zone_restore_to_reg_ct,
@@ -244,6 +245,7 @@ mlx5e_tc_match_to_reg_set(struct mlx5_core_dev *mdev,
 			  enum mlx5e_tc_attr_to_reg type,
 			  u32 data)
 {
+	int excluded_bits = mlx5e_tc_attr_to_reg_mappings[type].excluded_bits;
 	int moffset = mlx5e_tc_attr_to_reg_mappings[type].moffset;
 	int mfield = mlx5e_tc_attr_to_reg_mappings[type].mfield;
 	int mlen = mlx5e_tc_attr_to_reg_mappings[type].mlen;
@@ -264,7 +266,7 @@ mlx5e_tc_match_to_reg_set(struct mlx5_core_dev *mdev,
 	MLX5_SET(set_action_in, modact, action_type, MLX5_ACTION_TYPE_SET);
 	MLX5_SET(set_action_in, modact, field, mfield);
 	MLX5_SET(set_action_in, modact, offset, moffset * 8);
-	MLX5_SET(set_action_in, modact, length, mlen * 8);
+	MLX5_SET(set_action_in, modact, length, mlen * 8 - excluded_bits);
 	MLX5_SET(set_action_in, modact, data, data);
 	mod_hdr_acts->num_actions++;
 
@@ -2032,7 +2034,7 @@ err_enc_opts:
 static void mlx5e_put_flow_tunnel_id(struct mlx5e_tc_flow *flow)
 {
 	u32 enc_opts_id = flow->tunnel_id & ENC_OPTS_BITS_MASK;
-	u32 tun_id = flow->tunnel_id >> ENC_OPTS_BITS;
+	u32 tun_id = (flow->tunnel_id >> ENC_OPTS_BITS) & TUNNEL_INFO_BITS_MASK;
 	struct mlx5_rep_uplink_priv *uplink_priv;
 	struct mlx5e_rep_priv *uplink_rpriv;
 	struct mlx5_eswitch *esw;

@@ -527,7 +527,7 @@ static bool mlx5e_restore_tunnel(struct mlx5e_priv *priv, struct sk_buff *skb,
 	int err;
 
 	enc_opts_id = tunnel_id & ENC_OPTS_BITS_MASK;
-	tun_id = tunnel_id >> ENC_OPTS_BITS;
+	tun_id = (tunnel_id >> ENC_OPTS_BITS) & TUNNEL_INFO_BITS_MASK;
 
 	if (!tun_id)
 		return true;

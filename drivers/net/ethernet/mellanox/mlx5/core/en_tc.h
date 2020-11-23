@@ -112,7 +112,7 @@ struct tunnel_match_enc_opts {
  */
 #define TUNNEL_INFO_BITS 12
 #define TUNNEL_INFO_BITS_MASK GENMASK(TUNNEL_INFO_BITS - 1, 0)
-#define ENC_OPTS_BITS 12
+#define ENC_OPTS_BITS 11
 #define ENC_OPTS_BITS_MASK GENMASK(ENC_OPTS_BITS - 1, 0)
 #define TUNNEL_ID_BITS (TUNNEL_INFO_BITS + ENC_OPTS_BITS)
 #define TUNNEL_ID_MASK GENMASK(TUNNEL_ID_BITS - 1, 0)
@@ -184,6 +184,7 @@ struct mlx5e_tc_attr_to_reg_mapping {
 	int mlen; /* bytes to rewrite/match */
 
 	int soffset; /* offset of spec for match */
+	int excluded_bits; /* real length = mlen * 8 - exlcuded_bits  */
 };
 
 extern struct mlx5e_tc_attr_to_reg_mapping mlx5e_tc_attr_to_reg_mappings[];

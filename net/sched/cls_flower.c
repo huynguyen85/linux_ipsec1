@@ -31,6 +31,7 @@
 #include <net/tc_act/tc_mirred.h>
 #include <net/tc_act/tc_gact.h>
 #include <net/tc_act/tc_tunnel_key.h>
+#include <net/tc_act/tc_ct.h>
 
 #include <net/dst.h>
 #include <net/dst_metadata.h>
@@ -2093,6 +2094,9 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 	struct net *net = NULL;
 	struct tc_action *act;
 	bool skip_hw = false;
+	int last_ct_zone = -1;
+	int act_ct_count = 0;
+	int ct_count = 0;
 	int clone_i = 0;
 	int err, i;
 
@@ -2125,6 +2129,7 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 		entry = &trace->entries[i];
 
 		if (entry->type == E2E_CACHE_TRACE_CT) {
+			ct_count++;
 			err = fl_add_ct_nat(p_tmp, entry);
 			if (err)
 				goto errout_mkey;
@@ -2150,6 +2155,9 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 				err = fl_merge_pedit(p_tmp, act);
 				if (err)
 					goto errout_mkey;
+			} else if (is_tcf_ct(act)) {
+				if (last_ct_zone != tcf_ct_zone(act))
+					act_ct_count++;
 			}
 		}
 
@@ -2171,6 +2179,11 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 
 		if (!net)
 			net = f->exts.net;
+	}
+
+	if (act_ct_count != ct_count) {
+		err = -EOPNOTSUPP;
+		goto errout_mkey;
 	}
 
 	if (!net) {

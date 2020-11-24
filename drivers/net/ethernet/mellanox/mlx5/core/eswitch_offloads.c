@@ -358,20 +358,31 @@ mlx5_eswitch_add_offloaded_rule(struct mlx5_eswitch *esw,
 			i++;
 		} else {
 			for (j = esw_attr->split_count; j < esw_attr->out_count; j++) {
-				dest[i].type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
-				dest[i].vport.num = esw_attr->dests[j].rep->vport;
-				dest[i].vport.vhca_id =
-					MLX5_CAP_GEN(esw_attr->dests[j].mdev, vhca_id);
-				if (MLX5_CAP_ESW(esw->dev, merged_eswitch))
-					dest[i].vport.flags |=
-						MLX5_FLOW_DEST_VPORT_VHCA_ID;
-				if (esw_attr->dests[j].flags & MLX5_ESW_DEST_ENCAP) {
-					flow_act.action |= MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT;
-					flow_act.pkt_reformat =
+				if (esw->offloads.ipsec == DEVLINK_ESWITCH_IPSEC_MODE_FULL &&
+				    esw_attr->dests[j].rep &&
+				    esw_attr->dests[j].rep->vport == MLX5_VPORT_UPLINK) {
+					dest[i].type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
+					dest[i].ft = mlx5_esw_ipsec_get_table(esw, MLX5_ESW_IPSEC_FT_TX_CRYPTO);
+					if (esw_attr->dests[j].flags & MLX5_ESW_DEST_ENCAP) {
+						flow_act.action |= MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT;
+						flow_act.pkt_reformat = esw_attr->dests[j].pkt_reformat;
+					}
+				} else {
+					dest[i].type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
+					dest[i].vport.num = esw_attr->dests[j].rep->vport;
+					dest[i].vport.vhca_id =
+						MLX5_CAP_GEN(esw_attr->dests[j].mdev, vhca_id);
+					if (MLX5_CAP_ESW(esw->dev, merged_eswitch))
+						dest[i].vport.flags |=
+							MLX5_FLOW_DEST_VPORT_VHCA_ID;
+					if (esw_attr->dests[j].flags & MLX5_ESW_DEST_ENCAP) {
+						flow_act.action |= MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT;
+						flow_act.pkt_reformat =
+								esw_attr->dests[j].pkt_reformat;
+						dest[i].vport.flags |= MLX5_FLOW_DEST_VPORT_REFORMAT_ID;
+						dest[i].vport.pkt_reformat =
 							esw_attr->dests[j].pkt_reformat;
-					dest[i].vport.flags |= MLX5_FLOW_DEST_VPORT_REFORMAT_ID;
-					dest[i].vport.pkt_reformat =
-						esw_attr->dests[j].pkt_reformat;
+					}
 				}
 				i++;
 			}
@@ -793,8 +804,15 @@ mlx5_eswitch_add_send_to_vport_rule(struct mlx5_eswitch *esw, u16 vport,
 	MLX5_SET_TO_ONES(fte_match_set_misc, misc, source_port);
 
 	spec->match_criteria_enable = MLX5_MATCH_MISC_PARAMETERS;
-	dest.type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
-	dest.vport.num = vport;
+	if (esw->offloads.ipsec == DEVLINK_ESWITCH_IPSEC_MODE_FULL &&
+	    vport == MLX5_VPORT_UPLINK) {
+		dest.type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
+		dest.ft = mlx5_esw_ipsec_get_table(esw, MLX5_ESW_IPSEC_FT_TX_CRYPTO);
+	} else {
+		dest.type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
+		dest.vport.num = vport;
+	}
+
 	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST;
 
 	flow_rule = mlx5_add_flow_rules(esw->fdb_table.offloads.slow_fdb,

@@ -571,6 +571,76 @@ out:
 	return err;
 }
 
+static int tx_add_rule_full(struct mlx5e_priv *priv,
+			    struct mlx5_accel_esp_xfrm_attrs *attrs,
+			    u32 ipsec_obj_id,
+			    struct mlx5e_ipsec_rule *ipsec_rule)
+{
+	struct mlx5_core_dev *mdev = priv->mdev;
+	struct mlx5_flow_destination dest = {};
+	struct mlx5_flow_act flow_act = {};
+	struct mlx5_flow_handle *rule;
+	struct mlx5_flow_spec *spec;
+	struct mlx5_eswitch *esw;
+	char *reformatbf = NULL;
+	int reformat_type;
+	int err = 0;
+
+	esw = mdev->priv.eswitch;
+
+	if (esw->offloads.ipsec != DEVLINK_ESWITCH_IPSEC_MODE_FULL)
+		return -ENOTSUPP;
+
+	spec = kvzalloc(sizeof(*spec), GFP_KERNEL);
+	if (!spec)
+		return -ENOMEM;
+
+	setup_fte_common(attrs, ipsec_obj_id, spec, &flow_act);
+
+	/* IPsec Tx table1 FW rule */
+	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST | MLX5_FLOW_CONTEXT_ACTION_IPSEC_ENCRYPT
+			  | MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT;
+	reformatbf = kzalloc(16, GFP_KERNEL);
+	if (!reformatbf) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	memcpy(reformatbf, &attrs->spi, 4);
+	memcpy(reformatbf + 4, &attrs->seq, 4);
+	reformat_type = (attrs->is_ipv6) ? MLX5_REFORMAT_TYPE_ADD_ESP_TRANSPORT_OVER_IPV6 :
+			MLX5_REFORMAT_TYPE_ADD_ESP_TRANSPORT_OVER_IPV4;
+	flow_act.pkt_reformat = mlx5_packet_reformat_alloc(mdev, reformat_type,
+							   attrs->aulen / 4, 16, reformatbf, MLX5_FLOW_NAMESPACE_FDB);
+	kfree(reformatbf);
+	if (IS_ERR(flow_act.pkt_reformat)) {
+		err = PTR_ERR(flow_act.pkt_reformat);
+		netdev_err(priv->netdev, "Failed to allocate IPsec Tx reformat context err=%d\n",  err);
+		goto out;
+	}
+	ipsec_rule->pkt_reformat = flow_act.pkt_reformat;
+
+	dest.type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
+	dest.ft = mlx5_esw_ipsec_get_table(mdev->priv.eswitch, MLX5_ESW_IPSEC_FT_TX_CHK);
+	flow_act.ipsec_obj_id = ipsec_obj_id;
+	rule = mlx5_add_flow_rules(mlx5_esw_ipsec_get_table(esw, MLX5_ESW_IPSEC_FT_TX_CRYPTO), spec, &flow_act, &dest, 1);
+	if (IS_ERR(rule)) {
+		err = PTR_ERR(rule);
+		netdev_err(priv->netdev, "Failed to add IPsec FULL crypto rule attrs->action=0x%x, err=%d\n", attrs->action, err);
+		goto add_rule_err;
+	}
+	ipsec_rule->rule = rule;
+
+	goto out;
+
+add_rule_err:
+	mlx5_packet_reformat_dealloc(mdev, ipsec_rule->pkt_reformat);
+	ipsec_rule->pkt_reformat = NULL;
+out:
+	kvfree(spec);
+	return err;
+}
+
 static int tx_add_rule(struct mlx5e_priv *priv,
 		       struct mlx5_accel_esp_xfrm_attrs *attrs,
 		       u32 ipsec_obj_id,
@@ -637,7 +707,6 @@ static void tx_del_rule(struct mlx5e_priv *priv,
 {
 	mlx5_del_flow_rules(ipsec_rule->rule);
 	ipsec_rule->rule = NULL;
-
 	tx_ft_put(priv);
 }
 
@@ -647,6 +716,16 @@ static void rx_del_rule_full(struct mlx5e_priv *priv,
 {
 	mlx5_del_flow_rules(ipsec_rule->rule);
 	ipsec_rule->rule = NULL;
+}
+
+static void tx_del_rule_full(struct mlx5e_priv *priv,
+			     struct mlx5e_ipsec_rule *ipsec_rule)
+{
+	mlx5_del_flow_rules(ipsec_rule->rule);
+	ipsec_rule->rule = NULL;
+
+	mlx5_packet_reformat_dealloc(priv->mdev, ipsec_rule->pkt_reformat);
+	ipsec_rule->pkt_reformat = NULL;
 }
 
 static int
@@ -661,7 +740,7 @@ ipsec_full_add_rule(struct mlx5e_priv *priv,
 	if (attrs->action == MLX5_ACCEL_ESP_ACTION_DECRYPT)
 		return rx_add_rule_full(priv, attrs, ipsec_obj_id, ipsec_rule);
 	else
-		return -EINVAL;
+		return tx_add_rule_full(priv, attrs, ipsec_obj_id, ipsec_rule);
 }
 
 static int
@@ -701,7 +780,7 @@ ipsec_full_del_rule(struct mlx5e_priv *priv,
 	if (attrs->action == MLX5_ACCEL_ESP_ACTION_DECRYPT)
 		return rx_del_rule_full(priv, attrs, ipsec_rule);
 	else
-		return;
+		return tx_del_rule_full(priv, ipsec_rule);
 }
 
 static void

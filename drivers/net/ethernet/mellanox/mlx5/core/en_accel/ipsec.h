@@ -100,6 +100,7 @@ struct mlx5e_ipsec_esn_state {
 struct mlx5e_ipsec_rule {
 	struct mlx5_flow_handle *rule;
 	struct mlx5_modify_hdr *set_modify_hdr;
+	struct mlx5_pkt_reformat *pkt_reformat;
 };
 
 struct mlx5e_ipsec_sa_entry {

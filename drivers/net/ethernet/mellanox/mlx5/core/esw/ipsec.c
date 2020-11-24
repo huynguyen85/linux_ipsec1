@@ -24,6 +24,16 @@
 #define esw_ipsec_decap_rule_counter(esw) (esw_ipsec_priv(esw)->decap_rule_counter)
 #define esw_ipsec_decap_miss_rule_counter(esw) (esw_ipsec_priv(esw)->decap_miss_rule_counter)
 
+#define esw_ipsec_ft_crypto_tx(esw) (esw_ipsec_priv(esw)->ipsec_fdb_crypto_tx)
+#define esw_ipsec_ft_crypto_tx_grp(esw) (esw_ipsec_priv(esw)->ipsec_fdb_crypto_tx_grp)
+#define esw_ipsec_ft_crypto_tx_miss_rule(esw) (esw_ipsec_priv(esw)->ipsec_fdb_crypto_tx_miss_rule)
+#define esw_ipsec_ft_tx_chk(esw) (esw_ipsec_priv(esw)->ipsec_fdb_tx_chk)
+#define esw_ipsec_ft_tx_chk_grp(esw) (esw_ipsec_priv(esw)->ipsec_fdb_tx_chk_grp)
+#define esw_ipsec_ft_tx_chk_rule(esw) (esw_ipsec_priv(esw)->ipsec_fdb_tx_chk_rule)
+#define esw_ipsec_ft_tx_chk_rule_drop(esw) (esw_ipsec_priv(esw)->ipsec_fdb_tx_chk_rule_drop)
+#define esw_ipsec_tx_chk_counter(esw) (esw_ipsec_priv(esw)->tx_chk_rule_counter)
+#define esw_ipsec_tx_chk_drop_counter(esw) (esw_ipsec_priv(esw)->tx_chk_drop_rule_counter)
+
 struct mlx5_esw_ipsec_priv {
 	/* Rx tables, groups and miss rules */
 	struct mlx5_flow_table *ipsec_fdb_crypto_rx;
@@ -38,6 +48,17 @@ struct mlx5_esw_ipsec_priv {
 	struct mlx5_modify_hdr *modify_hdr;
 	struct mlx5_fc *decap_rule_counter;
 	struct mlx5_fc *decap_miss_rule_counter;
+
+	/* Tx tables, groups and default rules */
+	struct mlx5_flow_table *ipsec_fdb_crypto_tx;
+	struct mlx5_flow_group *ipsec_fdb_crypto_tx_grp;
+	struct mlx5_flow_handle *ipsec_fdb_crypto_tx_miss_rule;
+	struct mlx5_flow_table *ipsec_fdb_tx_chk;
+	struct mlx5_flow_group *ipsec_fdb_tx_chk_grp;
+	struct mlx5_flow_handle *ipsec_fdb_tx_chk_rule;
+	struct mlx5_flow_handle *ipsec_fdb_tx_chk_rule_drop;
+	struct mlx5_fc *tx_chk_rule_counter;
+	struct mlx5_fc *tx_chk_drop_rule_counter;
 };
 
 static struct mlx5_flow_table *esw_ipsec_table_create(struct mlx5_flow_namespace *ns,
@@ -296,6 +317,193 @@ out:
 	return err;
 }
 
+static void esw_offloads_ipsec_tables_tx_destroy(struct mlx5_eswitch *esw)
+{
+	/* Tx table 2 */
+	if (esw_ipsec_ft_tx_chk_rule(esw)) {
+		mlx5_del_flow_rules(esw_ipsec_ft_tx_chk_rule(esw));
+		esw_ipsec_ft_tx_chk_rule(esw) = NULL;
+	}
+
+	if (esw_ipsec_tx_chk_counter(esw)) {
+		mlx5_fc_destroy(esw->dev, esw_ipsec_tx_chk_counter(esw));
+		esw_ipsec_tx_chk_counter(esw) = NULL;
+	}
+
+	if (esw_ipsec_ft_tx_chk_rule_drop(esw)) {
+		mlx5_del_flow_rules(esw_ipsec_ft_tx_chk_rule_drop(esw));
+		esw_ipsec_ft_tx_chk_rule_drop(esw) = NULL;
+	}
+
+	if (esw_ipsec_tx_chk_drop_counter(esw)) {
+		mlx5_fc_destroy(esw->dev, esw_ipsec_tx_chk_drop_counter(esw));
+		esw_ipsec_tx_chk_drop_counter(esw) = NULL;
+	}
+
+	if (esw_ipsec_ft_tx_chk_grp(esw)) {
+		mlx5_destroy_flow_group(esw_ipsec_ft_tx_chk_grp(esw));
+		esw_ipsec_ft_tx_chk_grp(esw) = NULL;
+	}
+
+	if (esw_ipsec_ft_tx_chk(esw)) {
+		mlx5_destroy_flow_table(esw_ipsec_ft_tx_chk(esw));
+		esw_ipsec_ft_tx_chk(esw) = NULL;
+	}
+
+	/* Tx table1 */
+	if (esw_ipsec_ft_crypto_tx_miss_rule(esw)) {
+		mlx5_del_flow_rules(esw_ipsec_ft_crypto_tx_miss_rule(esw));
+		esw_ipsec_ft_crypto_tx_miss_rule(esw) = NULL;
+	}
+
+	if (esw_ipsec_ft_crypto_tx_grp(esw)) {
+		mlx5_destroy_flow_group(esw_ipsec_ft_crypto_tx_grp(esw));
+		esw_ipsec_ft_crypto_tx_grp(esw) = NULL;
+	}
+
+	if (esw_ipsec_ft_crypto_tx(esw)) {
+		mlx5_destroy_flow_table(esw_ipsec_ft_crypto_tx(esw));
+		esw_ipsec_ft_crypto_tx(esw) = NULL;
+	}
+}
+
+static int esw_offloads_ipsec_tables_tx_create(struct mlx5_flow_namespace *ns, struct mlx5_eswitch *esw)
+{
+	int inlen = MLX5_ST_SZ_BYTES(create_flow_group_in);
+	struct mlx5_flow_destination dest[2];
+	struct mlx5_flow_act flow_act = {};
+	struct mlx5_flow_spec spec = {};
+	struct mlx5_flow_handle *rule;
+	struct mlx5_fc *flow_counter;
+	struct mlx5_flow_table *ft;
+	struct mlx5_flow_group *g;
+	u32 *flow_group_in;
+	int err = 0;
+
+	flow_group_in = kvzalloc(inlen, GFP_KERNEL);
+	if (!flow_group_in)
+		return -ENOMEM;
+
+	/* Tx table 1 */
+#define TX_TABLE_LEVEL_1 0
+	ft = esw_ipsec_table_create(ns, esw, FDB_CRYPTO_EGRESS, TX_TABLE_LEVEL_1, 1);
+	if (IS_ERR(ft)) {
+		err = PTR_ERR(ft);
+		esw_warn(esw->dev, "Failed to create IPsec Tx table err(%d)\n", err);
+		goto out_err;
+	}
+	esw_ipsec_ft_crypto_tx(esw) = ft;
+
+	/* default miss group/rule */
+	memset(flow_group_in, 0, inlen);
+	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index, esw_ipsec_ft_crypto_tx(esw)->max_fte - 1);
+	MLX5_SET(create_flow_group_in, flow_group_in, end_flow_index, esw_ipsec_ft_crypto_tx(esw)->max_fte - 1);
+	g = mlx5_create_flow_group(esw_ipsec_ft_crypto_tx(esw), flow_group_in);
+	if (IS_ERR(g)) {
+		err = PTR_ERR(g);
+		esw_warn(esw->dev, "Failed to IPsec Tx table default flow group err(%d)\n", err);
+		goto out_err;
+	}
+	esw_ipsec_ft_crypto_tx_grp(esw) = g;
+
+	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST;
+	memset(dest, 0, 2 * sizeof(struct mlx5_flow_destination));
+	dest[0].type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
+	dest[0].vport.num = MLX5_VPORT_UPLINK;
+	rule = mlx5_add_flow_rules(esw_ipsec_ft_crypto_tx(esw), &spec, &flow_act, dest, 1);
+	if (IS_ERR(rule)) {
+		err = PTR_ERR(rule);
+		esw_warn(esw->dev, "Failed to add IPsec Tx table default miss rule %d\n", err);
+		goto out_err;
+	}
+	esw_ipsec_ft_crypto_tx_miss_rule(esw) = rule;
+
+	/* Tx Table 2 */
+#define TX_TABLE_LEVEL_2 1
+	ft = esw_ipsec_table_create(ns, esw, FDB_CRYPTO_EGRESS, RX_TABLE_LEVEL_2, 1);
+	if (IS_ERR(ft)) {
+		err = PTR_ERR(ft);
+		esw_warn(esw->dev, "Failed to create Tx table 2 err(%d)\n", err);
+		goto out_err;
+	}
+	esw_ipsec_ft_tx_chk(esw) = ft;
+
+	/* Tx Table 2 - match all group create */
+	memset(flow_group_in, 0, inlen);
+	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index, esw_ipsec_ft_tx_chk(esw)->max_fte - 1);
+	MLX5_SET(create_flow_group_in, flow_group_in, end_flow_index, esw_ipsec_ft_tx_chk(esw)->max_fte - 1);
+	g = mlx5_create_flow_group(esw_ipsec_ft_tx_chk(esw), flow_group_in);
+	if (IS_ERR(g)) {
+		err = PTR_ERR(g);
+		esw_warn(esw->dev, "Failed to create Tx table2 default drop flow group err(%d)\n", err);
+		goto out_err;
+	}
+	esw_ipsec_ft_tx_chk_grp(esw) = g;
+
+	/* Tx Table 2 - add default drop rule */
+	flow_counter = mlx5_fc_create(esw->dev, false);
+	if (IS_ERR(flow_counter)) {
+		esw_warn(esw->dev, "fail to create tx chk drop flow counter err(%ld)\n", PTR_ERR(flow_counter));
+		err = PTR_ERR(flow_counter);
+		goto out_err;
+	}
+	esw_ipsec_tx_chk_drop_counter(esw) = flow_counter;
+
+	memset(dest, 0, 2 * sizeof(struct mlx5_flow_destination));
+	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_DROP | MLX5_FLOW_CONTEXT_ACTION_COUNT;
+	dest[0].type = MLX5_FLOW_DESTINATION_TYPE_COUNTER;
+	dest[0].counter_id = mlx5_fc_id(esw_ipsec_tx_chk_drop_counter(esw));
+	spec.flow_context.flow_source = MLX5_FLOW_CONTEXT_FLOW_SOURCE_LOCAL_VPORT;
+	rule = mlx5_add_flow_rules(esw_ipsec_ft_tx_chk(esw),  &spec, &flow_act, dest, 1);
+	if (IS_ERR(rule)) {
+		err = PTR_ERR(rule);
+		esw_warn(esw->dev, "fs offloads: Failed to add tx chk drop rule %d\n", err);
+		goto out_err;
+	}
+	esw_ipsec_ft_tx_chk_rule_drop(esw) = rule;
+
+	/* Tx Table 2 - add tx chk rule */
+	flow_counter = mlx5_fc_create(esw->dev, false);
+	if (IS_ERR(flow_counter)) {
+		esw_warn(esw->dev, "fail to create tx chk rule flow counter err(%ld)\n", PTR_ERR(flow_counter));
+		err = PTR_ERR(flow_counter);
+		goto out_err;
+	}
+	esw_ipsec_tx_chk_counter(esw) = flow_counter;
+
+	/* Tx Table 2 - check aso_return_reg (set to REG_C_5) */
+	memset(dest, 0, 2 * sizeof(struct mlx5_flow_destination));
+	memset(&spec, 0, sizeof(spec));
+	memset(&flow_act, 0, sizeof(flow_act));
+	MLX5_SET_TO_ONES(fte_match_param, spec.match_criteria, misc_parameters_2.metadata_reg_c_4);
+	MLX5_SET(fte_match_param, spec.match_value, misc_parameters_2.metadata_reg_c_4, 0);
+	spec.flow_context.flow_source = MLX5_FLOW_CONTEXT_FLOW_SOURCE_LOCAL_VPORT;
+	spec.match_criteria_enable = MLX5_MATCH_MISC_PARAMETERS_2;
+	flow_act.flags = FLOW_ACT_NO_APPEND;
+	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST | MLX5_FLOW_CONTEXT_ACTION_COUNT;
+
+	dest[0].type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
+	dest[0].vport.num = MLX5_VPORT_UPLINK;
+	dest[1].type = MLX5_FLOW_DESTINATION_TYPE_COUNTER;
+	dest[1].counter_id = mlx5_fc_id(esw_ipsec_tx_chk_counter(esw));
+
+	rule = mlx5_add_flow_rules(esw_ipsec_ft_tx_chk(esw), &spec, &flow_act, dest, 2);
+	if (IS_ERR(rule)) {
+		err = PTR_ERR(rule);
+		esw_warn(esw->dev, "Failed to add IPsec Tx chk rule err=%d\n",  err);
+		goto out_err;
+	}
+	esw_ipsec_ft_tx_chk_rule(esw) = rule;
+
+	goto out;
+
+out_err:
+	esw_offloads_ipsec_tables_tx_destroy(esw);
+out:
+	kvfree(flow_group_in);
+	return err;
+}
+
 struct mlx5_flow_table *mlx5_esw_ipsec_get_table(struct mlx5_eswitch *esw, enum mlx5_esw_ipsec_table_type type)
 {
 	switch (type) {
@@ -303,6 +511,10 @@ struct mlx5_flow_table *mlx5_esw_ipsec_get_table(struct mlx5_eswitch *esw, enum 
 		return esw_ipsec_ft_crypto_rx(esw);
 	case MLX5_ESW_IPSEC_FT_RX_DECAP:
 		return esw_ipsec_ft_decap_rx(esw);
+	case MLX5_ESW_IPSEC_FT_TX_CRYPTO:
+		return esw_ipsec_ft_crypto_tx(esw);
+	case MLX5_ESW_IPSEC_FT_TX_CHK:
+		return esw_ipsec_ft_tx_chk(esw);
 	default: return NULL;
 	}
 }
@@ -331,8 +543,16 @@ int mlx5_esw_ipsec_create(struct mlx5_eswitch *esw)
 		goto err_rx_create;
 	}
 
+	err = esw_offloads_ipsec_tables_tx_create(ns, esw);
+	if (err) {
+		esw_warn(esw->dev, "Failed to create IPsec Tx offloads FDB Tables err %d\n", err);
+		goto err_tx_create;
+	}
+
 	return 0;
 
+err_tx_create:
+	esw_offloads_ipsec_tables_rx_destroy(esw);
 err_rx_create:
 	kfree(ipsec_priv);
 	esw_ipsec_priv(esw) = NULL;
@@ -347,6 +567,7 @@ void mlx5_esw_ipsec_destroy(struct mlx5_eswitch *esw)
 	if (esw->offloads.ipsec != DEVLINK_ESWITCH_IPSEC_MODE_FULL)
 		return;
 
+	esw_offloads_ipsec_tables_tx_destroy(esw);
 	esw_offloads_ipsec_tables_rx_destroy(esw);
 	kfree(esw_ipsec_priv(esw));
 	esw_ipsec_priv(esw) = NULL;

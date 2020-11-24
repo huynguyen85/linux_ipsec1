@@ -5,10 +5,13 @@
 #define __ML5_ESW_IPSEC_H__
 
 #include "eswitch.h"
+#include "en_accel/ipsec.h"
 
 enum mlx5_esw_ipsec_table_type {
 	MLX5_ESW_IPSEC_FT_RX_CRYPTO,
 	MLX5_ESW_IPSEC_FT_RX_DECAP,
+	MLX5_ESW_IPSEC_FT_TX_CRYPTO,
+	MLX5_ESW_IPSEC_FT_TX_CHK,
 };
 
 #if IS_ENABLED(CONFIG_MLX5_EN_IPSEC)

@@ -42,6 +42,9 @@
 #include "en_accel/ipsec_rxtx.h"
 #include "en_accel/ipsec_fs.h"
 #include "eswitch.h"
+#include "esw/ipsec.h"
+#include <linux/ip.h>
+#include <linux/ipv6.h>
 
 static struct mlx5e_ipsec_sa_entry *to_ipsec_sa_entry(struct xfrm_state *x)
 {
@@ -56,6 +59,52 @@ static struct mlx5e_ipsec_sa_entry *to_ipsec_sa_entry(struct xfrm_state *x)
 
 	WARN_ON(sa->x != x);
 	return sa;
+}
+
+#define ipv6_equal(a, b) (memcmp(&(a), &(b), sizeof(a)) == 0)
+struct xfrm_state *mlx5e_ipsec_sadb_rx_lookup_state(struct mlx5e_ipsec *ipsec,
+						    struct sk_buff *skb, u8 ip_ver)
+{
+	struct mlx5e_ipsec_sa_entry *sa_entry, *sa;
+	struct ipv6hdr *v6_hdr;
+	struct iphdr *v4_hdr;
+	unsigned int temp;
+	u16 family;
+
+	sa = NULL;
+	if (ip_ver == 4) {
+		v4_hdr = (struct iphdr *)(skb->data + ETH_HLEN);;
+		family = AF_INET;
+	} else {
+		v6_hdr = (struct ipv6hdr *)(skb->data + ETH_HLEN);
+		family = AF_INET6;
+	}
+
+	hash_for_each_rcu(ipsec->sadb_rx, temp, sa_entry, hlist) {
+		if (sa_entry->x->props.family != family)
+			continue;
+
+		if (ip_ver == 4) {
+			if ((sa_entry->x->props.saddr.a4 == v4_hdr->saddr) &&
+			    (sa_entry->x->id.daddr.a4 == v4_hdr->daddr)) {
+				sa = sa_entry;
+				break;
+			}
+		} else {
+			if (ipv6_equal(sa_entry->x->id.daddr.a6, v6_hdr->daddr.in6_u.u6_addr32) &&
+			    ipv6_equal(sa_entry->x->props.saddr.a6, v6_hdr->saddr.in6_u.u6_addr32)) {
+				sa = sa_entry;
+				break;
+			}
+		}
+	}
+
+	if (sa) {
+		xfrm_state_hold(sa->x);
+		return sa->x;
+	}
+
+	return NULL;
 }
 
 struct xfrm_state *mlx5e_ipsec_sadb_rx_lookup(struct mlx5e_ipsec *ipsec,

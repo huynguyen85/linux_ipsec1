@@ -39,6 +39,7 @@
 #include "en_accel/ipsec.h"
 #include "accel/accel.h"
 #include "en.h"
+#include "../esw/ipsec.h"
 
 enum {
 	MLX5E_IPSEC_RX_SYNDROME_DECRYPTED = 0x11,
@@ -448,19 +449,46 @@ enum {
 	MLX5E_IPSEC_OFFLOAD_RX_SYNDROME_BAD_TRAILER,
 };
 
-void mlx5e_ipsec_offload_handle_rx_skb(struct net_device *netdev,
-				       struct sk_buff *skb,
-				       struct mlx5_cqe64 *cqe)
+static void
+handle_rx_skb_full(struct mlx5e_priv *priv,
+		   struct sk_buff *skb,
+		   struct mlx5_cqe64 *cqe)
+{
+	struct xfrm_state *xs;
+	struct sec_path *sp;
+	struct iphdr *v4_hdr;
+	u8 ip_ver;
+
+	v4_hdr = (struct iphdr *)(skb->data + ETH_HLEN);
+	ip_ver = v4_hdr->version;
+
+	if ((ip_ver != 4) && (ip_ver != 6))
+		return;
+
+	xs = mlx5e_ipsec_sadb_rx_lookup_state(priv->ipsec, skb, ip_ver);
+	if (!xs)
+		return;
+
+	sp = secpath_set(skb);
+	if (unlikely(!sp))
+		return;
+
+	sp->xvec[sp->len++] = xs;
+	return;
+}
+
+static void
+handle_rx_skb_inline(struct mlx5e_priv *priv,
+		     struct sk_buff *skb,
+		     struct mlx5_cqe64 *cqe)
 {
 	u32 ipsec_meta_data = be32_to_cpu(cqe->ft_metadata);
-	struct mlx5e_priv *priv;
 	struct xfrm_offload *xo;
 	struct xfrm_state *xs;
 	struct sec_path *sp;
 	u32  sa_handle;
 
 	sa_handle = MLX5_IPSEC_METADATA_HANDLE(ipsec_meta_data);
-	priv = netdev_priv(netdev);
 	sp = secpath_set(skb);
 	if (unlikely(!sp)) {
 		atomic64_inc(&priv->ipsec->sw_stats.ipsec_rx_drop_sp_alloc);
@@ -495,6 +523,18 @@ void mlx5e_ipsec_offload_handle_rx_skb(struct net_device *netdev,
 	default:
 		atomic64_inc(&priv->ipsec->sw_stats.ipsec_rx_drop_syndrome);
 	}
+}
+
+void mlx5e_ipsec_offload_handle_rx_skb(struct net_device *netdev,
+				       struct sk_buff *skb,
+				       struct mlx5_cqe64 *cqe)
+{
+	struct mlx5e_priv *priv = netdev_priv(netdev);
+
+	if (is_ipsec_full_offload(priv))
+		handle_rx_skb_full(priv, skb, cqe);
+	else
+		handle_rx_skb_inline(priv, skb, cqe);
 }
 
 void mlx5e_ipsec_build_inverse_table(void)

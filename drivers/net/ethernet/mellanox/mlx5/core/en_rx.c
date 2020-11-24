@@ -53,6 +53,7 @@
 #include "en/health.h"
 #include "en/params.h"
 #include "devlink.h"
+#include "esw/ipsec.h"
 
 static struct sk_buff *
 mlx5e_skb_from_cqe_mpwrq_linear(struct mlx5e_rq *rq, struct mlx5e_mpw_info *wi,
@@ -1004,7 +1005,8 @@ static inline void mlx5e_handle_csum(struct net_device *netdev,
 		if (unlikely(ipproto == IPPROTO_SCTP))
 			goto csum_unnecessary;
 
-		if (unlikely(mlx5_ipsec_is_rx_flow(cqe)))
+		if (unlikely(mlx5_ipsec_is_rx_flow(cqe) &&
+			     !is_ipsec_full_offload(netdev_priv(netdev))))
 			goto csum_none;
 
 		stats->csum_complete++;

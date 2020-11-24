@@ -123,7 +123,8 @@ void mlx5e_ipsec_build_netdev(struct mlx5e_priv *priv);
 
 struct xfrm_state *mlx5e_ipsec_sadb_rx_lookup(struct mlx5e_ipsec *dev,
 					      unsigned int handle);
-
+struct xfrm_state *mlx5e_ipsec_sadb_rx_lookup_state(struct mlx5e_ipsec *ipsec,
+						    struct sk_buff *skb, u8 ip_ver);
 #else
 
 static inline void mlx5e_ipsec_build_inverse_table(void)

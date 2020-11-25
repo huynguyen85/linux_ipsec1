@@ -32,6 +32,7 @@
 #include <net/tc_act/tc_gact.h>
 #include <net/tc_act/tc_tunnel_key.h>
 #include <net/tc_act/tc_ct.h>
+#include <net/tc_act/tc_csum.h>
 
 #include <net/dst.h>
 #include <net/dst_metadata.h>
@@ -2080,6 +2081,49 @@ static int fl_merge_pedit(struct tc_pedit_tmp *p, struct tc_action *act)
 	return 0;
 }
 
+static int fl_add_csum_to_filter(struct cls_fl_filter *fnew,
+				 struct tcf_proto *tp,
+				 struct net *net,
+				 struct netlink_ext_ack *extack)
+{
+	struct tcf_csum_params *params_new;
+	struct tc_action *act;
+	struct tcf_csum *p;
+	int err;
+
+	act = tcf_action_init_1(net, tp, NULL, NULL, "csum", false, true, false, extack);
+
+	if (IS_ERR(act) && PTR_ERR(act) == -EAGAIN)
+		act = tcf_action_init_1(net, tp, NULL, NULL, "csum", false, true, false, extack);
+
+	if (IS_ERR(act))
+		return PTR_ERR(act);
+
+	p = to_tcf_csum(act);
+	p->tcf_action = TC_ACT_PIPE;
+	params_new = kzalloc(sizeof(*params_new), GFP_KERNEL);
+	if (unlikely(!params_new)) {
+		err = -ENOMEM;
+		goto errout;
+	}
+	params_new->update_flags = TCA_CSUM_UPDATE_FLAG_IPV4HDR |
+				   TCA_CSUM_UPDATE_FLAG_TCP |
+				   TCA_CSUM_UPDATE_FLAG_UDP;
+
+	spin_lock_bh(&p->tcf_lock);
+	rcu_swap_protected(p->params, params_new,
+			   lockdep_is_held(&p->tcf_lock));
+	spin_unlock_bh(&p->tcf_lock);
+
+	fnew->exts.actions[fnew->exts.nr_actions++] = act;
+
+	return 0;
+
+errout:
+	tcf_action_destroy_1(act, true);
+	return err;
+}
+
 static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 		    void **arg)
 {
@@ -2219,6 +2263,14 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 			pr_debug("extack msg: %s\n", extack._msg);
 		if (err)
 			goto errout;
+
+		// csum action
+		memset(&extack, 0, sizeof(extack));
+		err = fl_add_csum_to_filter(fnew, tp, net, &extack);
+		if (extack._msg)
+			pr_debug("extack msg: %s\n", extack._msg);
+		if (err)
+			goto errout_mkey;
 	}
 
 	/* copy actions */

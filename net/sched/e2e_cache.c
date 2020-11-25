@@ -20,6 +20,10 @@
 #include <linux/skbuff.h>
 #include <net/netfilter/nf_conntrack.h>
 
+static unsigned int e2e_size = 5000;
+module_param_named(e2e_size, e2e_size, uint, 0644);
+MODULE_PARM_DESC(e2e_size, "Max e2e cache entries. Default=10000");
+
 /* Number of reclassify + single CT per classify */
 #define E2E_CACHE_MAX_TRACE_ENTRIES (TCF_MAX_RECLASSIFY_LOOP * 2)
 
@@ -286,14 +290,14 @@ e2e_cache_entry_from_entry_node(struct e2e_cache_entry_node *node)
 	return container_of(node, struct e2e_cache_entry, nodes[node->pos]);
 }
 
-static void
+static bool
 e2e_cache_entry_remove(struct e2e_cache_entry *entry)
 {
 	struct tcf_e2e_cache *tcf_e2e_cache = entry->tcf_e2e_cache;
 	int i;
 
 	if (!test_and_clear_bit(E2E_ENTRY_INSERTED, &entry->flags))
-		return;
+		return false;
 
 	for (i = 0; i < entry->num_entries; i++) {
 		struct e2e_cache_entry_node *node = &entry->nodes[i];
@@ -312,6 +316,8 @@ e2e_cache_entry_remove(struct e2e_cache_entry *entry)
 			refcount_dec(&entry->ref);
 		}
 	}
+
+	return true;
 }
 
 static void
@@ -363,7 +369,8 @@ e2e_cache_entry_unref(const struct tcf_proto *tp, void *fh, unsigned long cookie
 		      void *arg, struct e2e_cache_entry *merged_entry,
 		      struct e2e_cache_entry_node *node)
 {
-	e2e_cache_entry_remove(merged_entry);
+	if (e2e_cache_entry_remove(merged_entry))
+		atomic_dec(&merged_entry->tcf_e2e_cache->entries);
 	return 0;
 }
 
@@ -700,6 +707,7 @@ err_out_merge:
 	tcf_proto_put(tp, false, NULL);
 err_out_tp:
 	e2e_cache_trace_release(trace);
+	atomic_dec(&tcf_e2e_cache->entries);
 }
 
 static void e2e_cache_trace_release_work(struct work_struct *work)
@@ -717,6 +725,9 @@ e2e_cache_trace_begin_impl(struct tcf_e2e_cache *tcf_e2e_cache, struct sk_buff *
 	struct e2e_cache_trace **trace = this_cpu_ptr(&packet_trace);
 	struct e2e_cache_tuple tuple;
 	u32 hash;
+
+	if (atomic_read(&tcf_e2e_cache->entries) >= e2e_size)
+	       return;
 
 	memset(&tuple, 0, sizeof(tuple));
 
@@ -856,6 +867,7 @@ e2e_cache_trace_end_impl(struct sk_buff *skb, int classify_result)
 		 , trace->num_tps
 		 , trace->num_conns);
 
+	atomic_inc(&trace->tcf_e2e_cache->entries);
 	INIT_WORK(&trace->work, e2e_cache_trace_process_work);
 	queue_work(e2e_wq, &trace->work);
 	return;

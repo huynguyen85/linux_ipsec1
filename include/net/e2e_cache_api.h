@@ -24,6 +24,7 @@ struct tcf_e2e_cache {
 	struct list_head fts;
 	struct list_head list;
 	struct rcu_head rcu;
+	atomic_t entries;
 };
 
 struct e2e_cache_trace_entry {

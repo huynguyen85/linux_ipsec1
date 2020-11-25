@@ -24,6 +24,10 @@ static unsigned int e2e_size = 5000;
 module_param_named(e2e_size, e2e_size, uint, 0644);
 MODULE_PARM_DESC(e2e_size, "Max e2e cache entries. Default=10000");
 
+static unsigned int e2e_cpu_percentage = 50;
+module_param_named(e2e_cpu_percentage, e2e_cpu_percentage, uint, 0644);
+MODULE_PARM_DESC(e2e_cpu_percentage, "Max e2e cache cpu usage in percentage, Default=50(%)");
+
 /* Number of reclassify + single CT per classify */
 #define E2E_CACHE_MAX_TRACE_ENTRIES (TCF_MAX_RECLASSIFY_LOOP * 2)
 
@@ -135,6 +139,17 @@ static struct workqueue_struct *e2e_wq;
 static LIST_HEAD(e2e_caches);
 static DECLARE_RWSEM(e2e_caches_lock);
 static const u32 prio = 1 << 16;
+
+static bool
+e2e_cache_queue_work(struct work_struct *work)
+{
+	static u32 next_cpu = 0;
+
+	int cpu = next_cpu++ % (num_online_cpus() * e2e_cpu_percentage / 100);
+
+	pr_debug("next_cpu=%d online=%d running on cpu %d", next_cpu, num_online_cpus(), cpu);
+	return queue_work_on(cpu, e2e_wq, work);
+}
 
 static struct tcf_proto *
 e2e_cache_lookup_tp(struct tcf_block *block, const struct tcf_proto_ops *ops,
@@ -347,7 +362,7 @@ e2e_cache_entry_put(struct e2e_cache_entry *entry)
 		return;
 
 	INIT_WORK(&entry->work, &e2e_cache_entry_delete_work);
-	queue_work(e2e_wq, &entry->work);
+	e2e_cache_queue_work(&entry->work);
 }
 
 static void
@@ -869,7 +884,7 @@ e2e_cache_trace_end_impl(struct sk_buff *skb, int classify_result)
 
 	atomic_inc(&trace->tcf_e2e_cache->entries);
 	INIT_WORK(&trace->work, e2e_cache_trace_process_work);
-	queue_work(e2e_wq, &trace->work);
+	e2e_cache_queue_work(&trace->work);
 	return;
 
 trace_failed:
@@ -880,7 +895,7 @@ trace_failed:
 		 * must be done on workqueue.
 		 */
 		INIT_WORK(&trace->work, e2e_cache_trace_release_work);
-		queue_work(e2e_wq, &trace->work);
+		e2e_cache_queue_work(&trace->work);
 	} else {
 		e2e_cache_trace_release(trace);
 	}

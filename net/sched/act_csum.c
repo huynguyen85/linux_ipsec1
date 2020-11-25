@@ -49,23 +49,23 @@ static int tcf_csum_init(struct net *net, struct nlattr *nla,
 	struct tcf_csum_params *params_new;
 	struct nlattr *tb[TCA_CSUM_MAX + 1];
 	struct tcf_chain *goto_ch = NULL;
-	struct tc_csum *parm;
+	struct tc_csum *parm = NULL;
 	struct tcf_csum *p;
 	int ret = 0, err;
-	u32 index;
+	u32 index = 0;
 
-	if (nla == NULL)
-		return -EINVAL;
+	if (nla) {
+		err = nla_parse_nested_deprecated(tb, TCA_CSUM_MAX, nla, csum_policy,
+						  NULL);
+		if (err < 0)
+			return err;
 
-	err = nla_parse_nested_deprecated(tb, TCA_CSUM_MAX, nla, csum_policy,
-					  NULL);
-	if (err < 0)
-		return err;
+		if (tb[TCA_CSUM_PARMS] == NULL)
+			return -EINVAL;
+		parm = nla_data(tb[TCA_CSUM_PARMS]);
+		index = parm->index;
+	}
 
-	if (tb[TCA_CSUM_PARMS] == NULL)
-		return -EINVAL;
-	parm = nla_data(tb[TCA_CSUM_PARMS]);
-	index = parm->index;
 	err = tcf_idr_check_alloc(tn, &index, a, bind);
 	if (!err) {
 		ret = tcf_idr_create_from_flags(tn, index, est, a,
@@ -86,29 +86,31 @@ static int tcf_csum_init(struct net *net, struct nlattr *nla,
 		return err;
 	}
 
-	err = tcf_action_check_ctrlact(parm->action, tp, &goto_ch, extack);
-	if (err < 0)
-		goto release_idr;
+	if (parm) {
+		err = tcf_action_check_ctrlact(parm->action, tp, &goto_ch, extack);
+		if (err < 0)
+			goto release_idr;
 
-	p = to_tcf_csum(*a);
+		p = to_tcf_csum(*a);
 
-	params_new = kzalloc(sizeof(*params_new), GFP_KERNEL);
-	if (unlikely(!params_new)) {
-		err = -ENOMEM;
-		goto put_chain;
+		params_new = kzalloc(sizeof(*params_new), GFP_KERNEL);
+		if (unlikely(!params_new)) {
+			err = -ENOMEM;
+			goto put_chain;
+		}
+		params_new->update_flags = parm->update_flags;
+
+		spin_lock_bh(&p->tcf_lock);
+		goto_ch = tcf_action_set_ctrlact(*a, parm->action, goto_ch);
+		rcu_swap_protected(p->params, params_new,
+				   lockdep_is_held(&p->tcf_lock));
+		spin_unlock_bh(&p->tcf_lock);
+
+		if (goto_ch)
+			tcf_chain_put_by_act(goto_ch);
+		if (params_new)
+			kfree_rcu(params_new, rcu);
 	}
-	params_new->update_flags = parm->update_flags;
-
-	spin_lock_bh(&p->tcf_lock);
-	goto_ch = tcf_action_set_ctrlact(*a, parm->action, goto_ch);
-	rcu_swap_protected(p->params, params_new,
-			   lockdep_is_held(&p->tcf_lock));
-	spin_unlock_bh(&p->tcf_lock);
-
-	if (goto_ch)
-		tcf_chain_put_by_act(goto_ch);
-	if (params_new)
-		kfree_rcu(params_new, rcu);
 
 	if (ret == ACT_P_CREATED)
 		tcf_idr_insert(tn, *a);

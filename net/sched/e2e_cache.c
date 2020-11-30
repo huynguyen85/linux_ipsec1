@@ -64,6 +64,7 @@ struct e2e_cache_trace {
 	u32 flags;
 	const struct tcf_proto_ops *ops;
 
+	struct Qdisc *qdisc;
 	struct e2e_cache_trace_entry entries[E2E_CACHE_MAX_TRACE_ENTRIES];
 	int num_entries;
 
@@ -655,6 +656,12 @@ static void e2e_cache_trace_release(struct e2e_cache_trace *trace)
 		}
 	}
 
+	/* Qdisc must only be released after its child objects (tp's, filters,
+	 * etc.)
+	 */
+	if (trace->qdisc)
+		qdisc_put_unlocked(trace->qdisc);
+
 	e2e_cache_unmark_tracing(trace->hash);
 	kmem_cache_free(e2e_cache_mem, trace);
 }
@@ -808,6 +815,13 @@ e2e_cache_trace_tp_impl(struct sk_buff *skb,
 		if (!tp->ops->merge || !tp->ops->take || !tp->ops->put)
 			goto not_cacheable;
 		trace->protocol = tp->protocol;
+
+		if (tp->chain->block->q) {
+			trace->qdisc =
+				qdisc_refcount_inc_nz(tp->chain->block->q);
+			if (!trace->qdisc)
+				goto not_cacheable;
+		}
 	} else if (trace->ops != tp->ops) {
 		pr_debug("trace=0x%p diff ops: 0x%p 0x%p\n", trace, trace->ops, tp->ops);
 		goto not_cacheable;
@@ -890,9 +904,9 @@ e2e_cache_trace_end_impl(struct sk_buff *skb, int classify_result)
 trace_failed:
 	pr_debug("cleaning up trace of %d chains\n", trace->num_tps);
 	trace->tcf_e2e_cache = NULL;
-	if (trace->num_entries) {
-		/* Releasing tp or filter instance is potentially sleeping and
-		 * must be done on workqueue.
+	if (trace->qdisc || trace->num_entries) {
+		/* Releasing Qdisc, tp or filter instance is potentially
+		 * sleeping and must be done on workqueue.
 		 */
 		INIT_WORK(&trace->work, e2e_cache_trace_release_work);
 		e2e_cache_queue_work(&trace->work);

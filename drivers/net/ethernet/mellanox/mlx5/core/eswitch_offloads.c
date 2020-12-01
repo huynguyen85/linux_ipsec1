@@ -84,6 +84,11 @@ struct mlx5_vport_table {
 
 #define MLX5_ESW_VPORT_TBL_NUM_GROUPS  4
 
+static bool same_vhca_id(struct mlx5_core_dev *mdev1, struct mlx5_core_dev *mdev2)
+{
+	return (MLX5_CAP_GEN(mdev1, vhca_id) == MLX5_CAP_GEN(mdev2, vhca_id));
+}
+
 static struct mlx5_flow_table *
 esw_vport_tbl_create(struct mlx5_eswitch *esw, struct mlx5_flow_namespace *ns)
 {
@@ -360,13 +365,10 @@ mlx5_eswitch_add_offloaded_rule(struct mlx5_eswitch *esw,
 			for (j = esw_attr->split_count; j < esw_attr->out_count; j++) {
 				if (esw->offloads.ipsec == DEVLINK_ESWITCH_IPSEC_MODE_FULL &&
 				    esw_attr->dests[j].rep &&
-				    esw_attr->dests[j].rep->vport == MLX5_VPORT_UPLINK) {
+				    esw_attr->dests[j].rep->vport == MLX5_VPORT_UPLINK &&
+				    same_vhca_id(esw_attr->dests[j].mdev, esw->dev)) {
 					dest[i].type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
 					dest[i].ft = mlx5_esw_ipsec_get_table(esw, MLX5_ESW_IPSEC_FT_TX_CRYPTO);
-					if (esw_attr->dests[j].flags & MLX5_ESW_DEST_ENCAP) {
-						flow_act.action |= MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT;
-						flow_act.pkt_reformat = esw_attr->dests[j].pkt_reformat;
-					}
 				} else {
 					dest[i].type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
 					dest[i].vport.num = esw_attr->dests[j].rep->vport;
@@ -375,14 +377,15 @@ mlx5_eswitch_add_offloaded_rule(struct mlx5_eswitch *esw,
 					if (MLX5_CAP_ESW(esw->dev, merged_eswitch))
 						dest[i].vport.flags |=
 							MLX5_FLOW_DEST_VPORT_VHCA_ID;
-					if (esw_attr->dests[j].flags & MLX5_ESW_DEST_ENCAP) {
-						flow_act.action |= MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT;
-						flow_act.pkt_reformat =
-								esw_attr->dests[j].pkt_reformat;
-						dest[i].vport.flags |= MLX5_FLOW_DEST_VPORT_REFORMAT_ID;
-						dest[i].vport.pkt_reformat =
+				}
+
+				if (esw_attr->dests[j].flags & MLX5_ESW_DEST_ENCAP) {
+					flow_act.action |= MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT;
+					flow_act.pkt_reformat =
 							esw_attr->dests[j].pkt_reformat;
-					}
+					dest[i].vport.flags |= MLX5_FLOW_DEST_VPORT_REFORMAT_ID;
+					dest[i].vport.pkt_reformat =
+						esw_attr->dests[j].pkt_reformat;
 				}
 				i++;
 			}

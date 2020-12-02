@@ -20,9 +20,13 @@
 #define esw_ipsec_decap_miss_rule(esw) (esw_ipsec_priv(esw)->ipsec_fdb_decap_miss_rule)
 #define esw_ipsec_decap_rule(esw) (esw_ipsec_priv(esw)->ipsec_fdb_decap_rule)
 #define esw_ipsec_pkt_reformat(esw) (esw_ipsec_priv(esw)->pkt_reformat)
-#define esw_ipsec_decap_modify_hdr(esw) (esw_ipsec_priv(esw)->modify_hdr)
 #define esw_ipsec_decap_rule_counter(esw) (esw_ipsec_priv(esw)->decap_rule_counter)
 #define esw_ipsec_decap_miss_rule_counter(esw) (esw_ipsec_priv(esw)->decap_miss_rule_counter)
+
+#define esw_ipsec_ft_pol_rx(esw) (esw_ipsec_priv(esw)->ipsec_fdb_pol_rx)
+#define esw_ipsec_pol_miss_grp(esw) (esw_ipsec_priv(esw)->ipsec_fdb_pol_miss_grp)
+#define esw_ipsec_pol_miss_rule(esw) (esw_ipsec_priv(esw)->ipsec_fdb_pol_miss_rule)
+#define esw_ipsec_pol_miss_rule_counter(esw) (esw_ipsec_priv(esw)->pol_miss_rule_counter)
 
 #define esw_ipsec_ft_crypto_tx(esw) (esw_ipsec_priv(esw)->ipsec_fdb_crypto_tx)
 #define esw_ipsec_ft_crypto_tx_grp(esw) (esw_ipsec_priv(esw)->ipsec_fdb_crypto_tx_grp)
@@ -47,9 +51,14 @@ struct mlx5_esw_ipsec_priv {
 	struct mlx5_flow_handle *ipsec_fdb_decap_miss_rule;
 	struct mlx5_flow_handle *ipsec_fdb_decap_rule;
 	struct mlx5_pkt_reformat *pkt_reformat;
-	struct mlx5_modify_hdr *modify_hdr;
+
+	struct mlx5_flow_table *ipsec_fdb_pol_rx;
+	struct mlx5_flow_group *ipsec_fdb_pol_miss_grp;
+	struct mlx5_flow_handle *ipsec_fdb_pol_miss_rule;
+
 	struct mlx5_fc *decap_rule_counter;
 	struct mlx5_fc *decap_miss_rule_counter;
+	struct mlx5_fc *pol_miss_rule_counter;
 
 	/* Tx tables, groups and default rules */
 	struct mlx5_flow_table *ipsec_fdb_crypto_tx;
@@ -101,17 +110,31 @@ static void esw_offloads_ipsec_tables_rx_destroy(struct mlx5_eswitch *esw)
 	if (esw_ipsec_pkt_reformat(esw)) {
 		mlx5_packet_reformat_dealloc(esw->dev, esw_ipsec_pkt_reformat(esw));
 		esw_ipsec_pkt_reformat(esw) = NULL;
-		mlx5_chains_put_table(esw_chains(esw), 0, 1, 0);
-	}
-
-	if (esw_ipsec_decap_modify_hdr(esw)) {
-		mlx5_modify_header_dealloc(esw->dev, esw_ipsec_decap_modify_hdr(esw));
-		esw_ipsec_decap_modify_hdr(esw) = NULL;
 	}
 
 	if (esw_ipsec_decap_rule_counter(esw)) {
 		mlx5_fc_destroy(esw->dev, esw_ipsec_decap_rule_counter(esw));
 		esw_ipsec_decap_rule_counter(esw) = NULL;
+	}
+
+	if (esw_ipsec_pol_miss_rule(esw)) {
+		mlx5_del_flow_rules(esw_ipsec_pol_miss_rule(esw));
+		esw_ipsec_pol_miss_rule(esw) = NULL;
+	}
+
+	if (esw_ipsec_pol_miss_rule_counter(esw)) {
+		mlx5_fc_destroy(esw->dev, esw_ipsec_pol_miss_rule_counter(esw));
+		esw_ipsec_pol_miss_rule_counter(esw) = NULL;
+	}
+
+	if (esw_ipsec_pol_miss_grp(esw)) {
+		mlx5_destroy_flow_group(esw_ipsec_pol_miss_grp(esw));
+		esw_ipsec_pol_miss_grp(esw) = NULL;
+	}
+
+	if (esw_ipsec_ft_pol_rx(esw)) {
+		mlx5_destroy_flow_table(esw_ipsec_ft_pol_rx(esw));
+		esw_ipsec_ft_pol_rx(esw) = NULL;
 	}
 
 	if (esw_ipsec_decap_miss_rule(esw)) {
@@ -151,13 +174,16 @@ static void esw_offloads_ipsec_tables_rx_destroy(struct mlx5_eswitch *esw)
 	}
 }
 
+u32 mlx5_esw_ipsec_get_decap_counter_id(struct mlx5_eswitch *esw)
+{
+	return mlx5_fc_id(esw_ipsec_decap_rule_counter(esw));
+}
+
 static int esw_offloads_ipsec_tables_rx_create(struct mlx5_flow_namespace *ns, struct mlx5_eswitch *esw)
 {
-	u8 action[MLX5_UN_SZ_BYTES(set_add_copy_action_in_auto)] = {};
 	int inlen = MLX5_ST_SZ_BYTES(create_flow_group_in);
+	struct mlx5_flow_destination dest = {};
 	struct mlx5_core_dev *mdev = esw->dev;
-	struct mlx5_flow_destination dest[2];
-	struct mlx5_modify_hdr *modify_hdr;
 	struct mlx5_flow_act flow_act = {};
 	struct mlx5_flow_spec spec = {};
 	struct mlx5_flow_handle *rule;
@@ -194,15 +220,15 @@ static int esw_offloads_ipsec_tables_rx_create(struct mlx5_flow_namespace *ns, s
 	esw_ipsec_ft_crypto_rx_miss_grp(esw) = g;
 
 	/* Rx Table 1 - default forward rule */
-	memset(dest, 0, 2 * sizeof(struct mlx5_flow_destination));
 	memset(&spec, 0, sizeof(spec));
 	memset(&flow_act, 0, sizeof(flow_act));
 	flow_act.flags = FLOW_ACT_NO_APPEND;
 	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST;
-	dest[0].type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
-	dest[0].ft = mlx5_chains_get_table(esw_chains(esw), 0, 1, 0);
-	rule = mlx5_add_flow_rules(esw_ipsec_ft_crypto_rx(esw), &spec, &flow_act, dest, 1);
+	dest.type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
+	dest.ft = mlx5_chains_get_table(esw_chains(esw), 0, 1, 0);
+	rule = mlx5_add_flow_rules(esw_ipsec_ft_crypto_rx(esw), &spec, &flow_act, &dest, 1);
 	if (IS_ERR(rule)) {
+		mlx5_chains_put_table(esw_chains(esw), 0, 1, 0);
 		err = PTR_ERR(rule);
 		esw_warn(esw->dev, "Failed to add IPsec Rx crypto forward rule err=%d\n",  err);
 		goto out_err;
@@ -240,12 +266,11 @@ static int esw_offloads_ipsec_tables_rx_create(struct mlx5_flow_namespace *ns, s
 	}
 	esw_ipsec_decap_miss_rule_counter(esw) = flow_counter;
 
-	memset(dest, 0, 2 * sizeof(struct mlx5_flow_destination));
 	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_DROP | MLX5_FLOW_CONTEXT_ACTION_COUNT;
-	dest[0].type = MLX5_FLOW_DESTINATION_TYPE_COUNTER;
-	dest[0].counter_id = mlx5_fc_id(esw_ipsec_decap_miss_rule_counter(esw));
+	dest.type = MLX5_FLOW_DESTINATION_TYPE_COUNTER;
+	dest.counter_id = mlx5_fc_id(esw_ipsec_decap_miss_rule_counter(esw));
 	spec.flow_context.flow_source = MLX5_FLOW_CONTEXT_FLOW_SOURCE_UPLINK;
-	rule = mlx5_add_flow_rules(esw_ipsec_ft_decap_rx(esw),  &spec, &flow_act, dest, 1);
+	rule = mlx5_add_flow_rules(esw_ipsec_ft_decap_rx(esw),  &spec, &flow_act, &dest, 1);
 	if (IS_ERR(rule)) {
 		err = PTR_ERR(rule);
 		esw_warn(esw->dev, "fs offloads: Failed to add ipsec_fdb_decap_rx default drop rule %d\n", err);
@@ -253,35 +278,69 @@ static int esw_offloads_ipsec_tables_rx_create(struct mlx5_flow_namespace *ns, s
 	}
 	esw_ipsec_decap_miss_rule(esw) = rule;
 
-	/* Rx Table 2 - add decap rule */
+/* Rx Table 3 */
+#define RX_TABLE_LEVEL_3 2
+	ft = esw_ipsec_table_create(ns, esw, FDB_CRYPTO_INGRESS, RX_TABLE_LEVEL_3, 1);
+	if (IS_ERR(ft)) {
+		err = PTR_ERR(ft);
+		esw_warn(esw->dev, "Failed to create Rx policy table err(%d)\n", err);
+		goto out_err;
+	}
+	esw_ipsec_ft_pol_rx(esw) = ft;
+
+	/* Rx Table3 - match all group create */
+	memset(flow_group_in, 0, inlen);
+	MLX5_SET(create_flow_group_in, flow_group_in, start_flow_index,
+		 esw_ipsec_ft_pol_rx(esw)->max_fte - 1);
+	MLX5_SET(create_flow_group_in, flow_group_in, end_flow_index,
+		 esw_ipsec_ft_pol_rx(esw)->max_fte - 1);
+	g = mlx5_create_flow_group(esw_ipsec_ft_pol_rx(esw), flow_group_in);
+	if (IS_ERR(g)) {
+		err = PTR_ERR(g);
+		esw_warn(esw->dev, "Failed to create Rx policy table default drop flow group err(%d)\n", err);
+		goto out_err;
+	}
+	esw_ipsec_pol_miss_grp(esw) = g;
+
+	/* Rx Table 3 - default drop rule counter create */
 	flow_counter = mlx5_fc_create(esw->dev, false);
 	if (IS_ERR(flow_counter)) {
-		esw_warn(esw->dev, "fail to create decap rule flow counter err(%ld)\n", PTR_ERR(flow_counter));
+		esw_warn(esw->dev, "fail to create Rx policy miss rule flow counter err(%ld)\n",
+			 PTR_ERR(flow_counter));
+		err = PTR_ERR(flow_counter);
+		goto out_err;
+	}
+	esw_ipsec_pol_miss_rule_counter(esw) = flow_counter; //TBD: expose it outside as unique counter
+
+	/* Rx Table 3 - add default drop rule */
+	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_DROP | MLX5_FLOW_CONTEXT_ACTION_COUNT;
+	dest.type = MLX5_FLOW_DESTINATION_TYPE_COUNTER;
+	dest.counter_id = mlx5_fc_id(esw_ipsec_pol_miss_rule_counter(esw));
+	spec.flow_context.flow_source = MLX5_FLOW_CONTEXT_FLOW_SOURCE_UPLINK;
+	rule = mlx5_add_flow_rules(esw_ipsec_ft_pol_rx(esw), &spec, &flow_act, &dest, 1);
+	if (IS_ERR(rule)) {
+		err = PTR_ERR(rule);
+		esw_warn(esw->dev, "fs offloads: Failed to add Rx policy default drop rule %d\n",
+			 err);
+		goto out_err;
+	}
+	esw_ipsec_pol_miss_rule(esw) = rule;
+
+	/* Rx Table 2 - check ipsec_syndrome and aso_return_reg (set to REG_C_4) Target is table3 */
+	/* Rx Table 2 - add decap rule - this to change to look at regc1 reformat type */
+	flow_counter = mlx5_fc_create(esw->dev, false);
+	if (IS_ERR(flow_counter)) {
+		esw_warn(esw->dev, "fail to create decap rule flow counter err(%ld)\n",
+			 PTR_ERR(flow_counter));
 		err = PTR_ERR(flow_counter);
 		goto out_err;
 	}
 	esw_ipsec_decap_rule_counter(esw) = flow_counter;
 
-	MLX5_SET(set_action_in, action, action_type, MLX5_ACTION_TYPE_SET);
-	MLX5_SET(set_action_in, action, field, MLX5_ACTION_IN_FIELD_METADATA_REG_C_1);
-	MLX5_SET(set_action_in, action, data, 1);
-	MLX5_SET(set_action_in, action, offset, 31);
-	MLX5_SET(set_action_in, action, length, 1);
-	modify_hdr = mlx5_modify_header_alloc(mdev, MLX5_FLOW_NAMESPACE_FDB, 1, action);
-	if (IS_ERR(modify_hdr)) {
-		err = PTR_ERR(modify_hdr);
-		esw_warn(esw->dev, "fail to alloc ipsec decap set modify_header_id err=%d\n", err);
-		goto out_err;
-	}
-	esw_ipsec_decap_modify_hdr(esw) = modify_hdr;
-
-	/* Rx Table 2 - check ipsec_syndrome and aso_return_reg (set to REG_C_5) */
-	memset(dest, 0, 2 * sizeof(struct mlx5_flow_destination));
 	memset(&spec, 0, sizeof(spec));
 	memset(&flow_act, 0, sizeof(flow_act));
 
-	flow_act.pkt_reformat = mlx5_packet_reformat_alloc(mdev, MLX5_REFORMAT_TYPE_DEL_ESP_TRANSPORT,
-							   0, 0, NULL, MLX5_FLOW_NAMESPACE_FDB);
+	flow_act.pkt_reformat = mlx5_packet_reformat_alloc(mdev, MLX5_REFORMAT_TYPE_DEL_ESP_TRANSPORT, 0, 0, NULL, MLX5_FLOW_NAMESPACE_FDB);
 	if (IS_ERR(flow_act.pkt_reformat)) {
 		err = PTR_ERR(flow_act.pkt_reformat);
 		esw_warn(esw->dev, "Failed to allocate delete esp reformat, err=%d\n", err);
@@ -289,23 +348,26 @@ static int esw_offloads_ipsec_tables_rx_create(struct mlx5_flow_namespace *ns, s
 	}
 	esw_ipsec_pkt_reformat(esw) = flow_act.pkt_reformat;
 
+	/* IPSec syndrome match */
 	MLX5_SET_TO_ONES(fte_match_param, spec.match_criteria, misc_parameters_2.ipsec_syndrome);
 	MLX5_SET(fte_match_param, spec.match_value, misc_parameters_2.ipsec_syndrome, 0);
+	/* ASO return reg syndrome match */
 	MLX5_SET_TO_ONES(fte_match_param, spec.match_criteria, misc_parameters_2.metadata_reg_c_4);
 	MLX5_SET(fte_match_param, spec.match_value, misc_parameters_2.metadata_reg_c_4, 0);
+	/* ESP reformat match */
+	MLX5_SET(fte_match_param, spec.match_criteria, misc_parameters_2.metadata_reg_c_1,
+		 IPSEC_FULL_ESP_REFORMAT_MASK);
+	MLX5_SET(fte_match_param, spec.match_value, misc_parameters_2.metadata_reg_c_1,
+		 ESW_IPSEC_DEL_ESP_TRANSPORT << IPSEC_FULL_ESP_REFORMAT_OFFSET);
 	spec.flow_context.flow_source = MLX5_FLOW_CONTEXT_FLOW_SOURCE_UPLINK;
 	spec.match_criteria_enable = MLX5_MATCH_MISC_PARAMETERS_2;
-	flow_act.modify_hdr = modify_hdr;
 	flow_act.flags = FLOW_ACT_NO_APPEND;
 	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_PACKET_REFORMAT |
-			  MLX5_FLOW_CONTEXT_ACTION_FWD_DEST |
-			  MLX5_FLOW_CONTEXT_ACTION_COUNT |
-			  MLX5_FLOW_CONTEXT_ACTION_MOD_HDR;
-	dest[0].type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
-	dest[0].ft = mlx5_chains_get_table(esw_chains(esw), 0, 1, 0);
-	dest[1].type = MLX5_FLOW_DESTINATION_TYPE_COUNTER;
-	dest[1].counter_id = mlx5_fc_id(esw_ipsec_decap_rule_counter(esw));
-	rule = mlx5_add_flow_rules(esw_ipsec_ft_decap_rx(esw), &spec, &flow_act, dest, 2);
+			  MLX5_FLOW_CONTEXT_ACTION_FWD_DEST;
+
+	dest.type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
+	dest.ft =  esw_ipsec_ft_pol_rx(esw);
+	rule = mlx5_add_flow_rules(esw_ipsec_ft_decap_rx(esw), &spec, &flow_act, &dest, 1);
 	if (IS_ERR(rule)) {
 		err = PTR_ERR(rule);
 		esw_warn(esw->dev, "Failed to add IPsec Rx decap rule err=%d\n",  err);
@@ -530,6 +592,8 @@ struct mlx5_flow_table *mlx5_esw_ipsec_get_table(struct mlx5_eswitch *esw, enum 
 		return esw_ipsec_ft_crypto_rx(esw);
 	case MLX5_ESW_IPSEC_FT_RX_DECAP:
 		return esw_ipsec_ft_decap_rx(esw);
+	case MLX5_ESW_IPSEC_FT_RX_POL:
+		return esw_ipsec_ft_pol_rx(esw);
 	case MLX5_ESW_IPSEC_FT_TX_CRYPTO:
 		return esw_ipsec_ft_crypto_tx(esw);
 	case MLX5_ESW_IPSEC_FT_TX_CHK:

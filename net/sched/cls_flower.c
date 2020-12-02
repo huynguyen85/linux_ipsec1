@@ -2187,6 +2187,7 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 		if (tc_skip_hw(f->flags))
 			skip_hw = true;
 
+		rtnl_lock();
 		tcf_exts_for_each_action(j, act, &f->exts) {
 			if (is_tcf_mirred_egress_redirect(act) ||
 			    is_tcf_mirred_egress_mirror(act) ||
@@ -2197,8 +2198,10 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 				clone_acts[clone_i++] = act;
 			} else if (is_tcf_pedit(act)) {
 				err = fl_merge_pedit(p_tmp, act);
-				if (err)
+				if (err) {
+					rtnl_unlock();
 					goto errout_mkey;
+				}
 			} else if (is_tcf_ct(act)) {
 				if (last_ct_zone != tcf_ct_zone(act)) {
 					act_ct_count++;
@@ -2206,6 +2209,7 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 				}
 			}
 		}
+		rtnl_unlock();
 
 		/* merge match */
 		dst = (u32 *)mkey;

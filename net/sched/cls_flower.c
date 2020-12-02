@@ -2200,8 +2200,10 @@ static int fl_merge(struct tcf_proto *tp, struct e2e_cache_trace_data *trace,
 				if (err)
 					goto errout_mkey;
 			} else if (is_tcf_ct(act)) {
-				if (last_ct_zone != tcf_ct_zone(act))
+				if (last_ct_zone != tcf_ct_zone(act)) {
 					act_ct_count++;
+					last_ct_zone = tcf_ct_zone(act);
+				}
 			}
 		}
 

@@ -604,6 +604,9 @@ static int tunnel_key_clone(struct tc_action *new, struct tc_action *orig)
 	if (params_orig->tcft_enc_metadata) {
 		int opts_len = params_orig->tcft_enc_metadata->u.tun_info.options_len;
 		struct metadata_dst *metadata;
+#ifdef CONFIG_DST_CACHE
+		int err;
+#endif
 
 		metadata = tun_rx_dst(opts_len);
 		if (!metadata) {
@@ -611,8 +614,15 @@ static int tunnel_key_clone(struct tc_action *new, struct tc_action *orig)
 			return -ENOMEM;
 		}
 		memcpy(metadata, params_orig->tcft_enc_metadata, sizeof(*metadata) + opts_len);
-		dst_hold(&params_orig->tcft_enc_metadata->dst);
 		params_new->tcft_enc_metadata = metadata;
+#ifdef CONFIG_DST_CACHE
+		err = dst_cache_init(&metadata->u.tun_info.dst_cache,
+				     GFP_ATOMIC);
+		if (err) {
+			tunnel_key_release_params(params_new);
+			return err;
+		}
+#endif
 	}
 
 	spin_lock_bh(&t->tcf_lock);

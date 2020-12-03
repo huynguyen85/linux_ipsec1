@@ -167,6 +167,12 @@ static void mlxbf_gige_mdio_enable_phy_int(struct mlxbf_gige *priv)
 	u32 val;
 
 	spin_lock_irqsave(&priv->gpio_lock, flags);
+	val = readl(priv->gpio_io +
+			MLXBF_GIGE_GPIO_CAUSE_OR_CLRCAUSE);
+	val |= priv->phy_int_gpio_mask;
+	writel(val, priv->gpio_io +
+			MLXBF_GIGE_GPIO_CAUSE_OR_CLRCAUSE);
+
 	/* The INT_N interrupt level is active low.
 	 * So enable cause fall bit to detect when GPIO
 	 * state goes low.

@@ -1142,6 +1142,8 @@ int mlx5_esw_modify_vport_rate(struct mlx5_eswitch *esw, u16 vport_num,
 	struct mlx5_vport *vport;
 
 	vport = mlx5_eswitch_get_vport(esw, vport_num);
+	if (IS_ERR(vport))
+		return PTR_ERR(vport);
 
 	if (!vport->qos.enabled)
 		return -EOPNOTSUPP;
@@ -1280,6 +1282,8 @@ int mlx5_esw_vport_enable(struct mlx5_eswitch *esw, u16 vport_num,
 	int ret;
 
 	vport = mlx5_eswitch_get_vport(esw, vport_num);
+	if (IS_ERR(vport))
+		return PTR_ERR(vport);
 
 	mutex_lock(&esw->state_lock);
 	WARN_ON(vport->enabled);
@@ -1315,6 +1319,8 @@ void mlx5_esw_vport_disable(struct mlx5_eswitch *esw, u16 vport_num)
 	struct mlx5_vport *vport;
 
 	vport = mlx5_eswitch_get_vport(esw, vport_num);
+	if (IS_ERR(vport))
+		return;
 
 	mutex_lock(&esw->state_lock);
 	if (!vport->enabled)

@@ -1125,7 +1125,7 @@ void mlx5dr_ste_build_src_gvmi_qpn(struct mlx5dr_ste_ctx *ste_ctx,
 	ste_ctx->build_src_gvmi_qpn_init(sb, mask);
 }
 
-static struct mlx5dr_ste_ctx *mlx5dr_ste_ctx_table[] = {
+static struct mlx5dr_ste_ctx *mlx5dr_ste_ctx_arr[] = {
 	[MLX5_STEERING_FORMAT_CONNECTX_5] = &ste_ctx_v0,
 	[MLX5_STEERING_FORMAT_CONNECTX_6DX] = NULL,
 };
@@ -1135,5 +1135,5 @@ struct mlx5dr_ste_ctx *mlx5dr_ste_get_ctx(u8 version)
 	if (version > MLX5_STEERING_FORMAT_CONNECTX_6DX)
 		return NULL;
 
-	return mlx5dr_ste_ctx_table[version];
+	return mlx5dr_ste_ctx_arr[version];
 }

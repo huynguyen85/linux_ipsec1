@@ -2007,6 +2007,16 @@ struct tcf_proto *tcf_chain_tp_find(struct tcf_chain *chain,
 }
 EXPORT_SYMBOL(tcf_chain_tp_find);
 
+static void tcf_e2e_cache_update_stats(struct tcf_proto *tp, void *fh)
+{
+	struct tcf_e2e_cache *e2e_cache = e2e_cache_deref_get(&tp->chain->block->tcf_e2e_cache);
+
+	if (e2e_cache) {
+		e2e_cache_filter_update_stats(e2e_cache, tp, fh);
+		e2e_cache_put(e2e_cache);
+	}
+}
+
 static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 			 struct tcf_proto *tp, struct tcf_block *block,
 			 struct Qdisc *q, u32 parent, void *fh,
@@ -2054,6 +2064,7 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 		tcm->tcm_handle = 0;
 	} else if (terse_dump) {
 		if (tp->ops->terse_dump) {
+			tcf_e2e_cache_update_stats(tp, fh);
 			if (tp->ops->terse_dump(net, tp, fh, skb, tcm,
 						rtnl_held) < 0)
 				goto nla_put_failure;
@@ -2062,15 +2073,7 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 		}
 	} else {
 		if (tp->ops->dump) {
-			struct tcf_e2e_cache *e2e_cache =
-				e2e_cache_deref_get(&tp->chain->block->tcf_e2e_cache);
-
-			if (e2e_cache) {
-				e2e_cache_filter_update_stats(e2e_cache, tp,
-							      fh);
-				e2e_cache_put(e2e_cache);
-			}
-
+			tcf_e2e_cache_update_stats(tp, fh);
 			if (tp->ops->dump(net, tp, fh, skb, tcm, rtnl_held) < 0)
 				goto nla_put_failure;
 		}

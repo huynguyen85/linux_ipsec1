@@ -28,6 +28,16 @@ static inline u16 mlx5_sf_max_functions(const struct mlx5_core_dev *dev)
 		return 1 << MLX5_CAP_GEN(dev, log_max_sf);
 }
 
+int mlx5_sf_hw_table_init(struct mlx5_core_dev *dev);
+void mlx5_sf_hw_table_cleanup(struct mlx5_core_dev *dev);
+
+int mlx5_sf_table_init(struct mlx5_core_dev *dev);
+void mlx5_sf_table_cleanup(struct mlx5_core_dev *dev);
+
+int mlx5_devlink_sf_port_new(struct devlink *devlink, const struct devlink_port_new_attrs *add_attr,
+			     struct netlink_ext_ack *extack);
+int mlx5_devlink_sf_port_del(struct devlink *devlink, unsigned int port_index,
+			     struct netlink_ext_ack *extack);
 #else
 
 static inline bool mlx5_sf_supported(const struct mlx5_core_dev *dev)
@@ -38,6 +48,24 @@ static inline bool mlx5_sf_supported(const struct mlx5_core_dev *dev)
 static inline u16 mlx5_sf_max_functions(const struct mlx5_core_dev *dev)
 {
 	return 0;
+}
+
+static inline int mlx5_sf_hw_table_init(struct mlx5_core_dev *dev)
+{
+	return 0;
+}
+
+static inline void mlx5_sf_hw_table_cleanup(struct mlx5_core_dev *dev)
+{
+}
+
+static inline int mlx5_sf_table_init(struct mlx5_core_dev *dev)
+{
+	return 0;
+}
+
+static inline void mlx5_sf_table_cleanup(struct mlx5_core_dev *dev)
+{
 }
 
 #endif

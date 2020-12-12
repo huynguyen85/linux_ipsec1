@@ -153,6 +153,17 @@ struct devlink_port {
 	struct mutex reporters_lock; /* Protects reporter_list */
 };
 
+struct devlink_port_new_attrs {
+	enum devlink_port_flavour flavour;
+	unsigned int port_index;
+	u32 controller;
+	u32 sfnum;
+	u16 pfnum;
+	u8 port_index_valid:1,
+	   controller_valid:1,
+	   sfnum_valid:1;
+};
+
 struct devlink_sb_pool_info {
 	enum devlink_sb_pool_type pool_type;
 	u32 size;
@@ -1363,6 +1374,34 @@ struct devlink_ops {
 	int (*port_function_hw_addr_set)(struct devlink *devlink, struct devlink_port *port,
 					 const u8 *hw_addr, int hw_addr_len,
 					 struct netlink_ext_ack *extack);
+	/**
+	 * @port_new: Port add function.
+	 *
+	 * Should be used by device driver to let caller add new port of a
+	 * specified flavour with optional attributes.
+	 * Driver should return -EOPNOTSUPP if it doesn't support port addition
+	 * of a specified flavour or specified attributes. Driver should set
+	 * extack error message in case of fail to add the port. Devlink core
+	 * does not hold a devlink instance lock when this callback is invoked.
+	 * Driver must ensures synchronization when adding or deleting a port.
+	 * Driver must register a port with devlink core.
+	 */
+	int (*port_new)(struct devlink *devlink,
+			const struct devlink_port_new_attrs *attrs,
+			struct netlink_ext_ack *extack);
+	/**
+	 * @port_del: Port delete function.
+	 *
+	 * Should be used by device driver to let caller delete port which was
+	 * previously created using port_new() callback.
+	 * Driver should return -EOPNOTSUPP if it doesn't support port deletion.
+	 * Driver should set extack error message in case of fail to delete the
+	 * port. Devlink core does not hold a devlink instance lock when this
+	 * callback is invoked. Driver must ensures synchronization when adding
+	 * or deleting a port. Driver must register a port with devlink core.
+	 */
+	int (*port_del)(struct devlink *devlink, unsigned int port_index,
+			struct netlink_ext_ack *extack);
 };
 
 static inline void *devlink_priv(struct devlink *devlink)

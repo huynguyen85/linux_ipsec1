@@ -1375,6 +1375,29 @@ struct devlink_ops {
 					 const u8 *hw_addr, int hw_addr_len,
 					 struct netlink_ext_ack *extack);
 	/**
+	 * @port_function_state_get: Port function's state get function.
+	 *
+	 * Should be used by device drivers to report the state of a function
+	 * managed by the devlink port. Driver should return -EOPNOTSUPP if it
+	 * doesn't support port function handling for a particular port.
+	 */
+	int (*port_function_state_get)(struct devlink *devlink,
+				       struct devlink_port *port,
+				       enum devlink_port_function_state *state,
+				       enum devlink_port_function_opstate *opstate,
+				       struct netlink_ext_ack *extack);
+	/**
+	 * @port_function_state_set: Port function's state set function.
+	 *
+	 * Should be used by device drivers to set the state of a function
+	 * managed by the devlink port. Driver should return -EOPNOTSUPP if it
+	 * doesn't support port function handling for a particular port.
+	 */
+	int (*port_function_state_set)(struct devlink *devlink,
+				       struct devlink_port *port,
+				       enum devlink_port_function_state state,
+				       struct netlink_ext_ack *extack);
+	/**
 	 * @port_new: Port add function.
 	 *
 	 * Should be used by device driver to let caller add new port of a

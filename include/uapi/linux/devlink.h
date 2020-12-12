@@ -583,9 +583,30 @@ enum devlink_resource_unit {
 enum devlink_port_function_attr {
 	DEVLINK_PORT_FUNCTION_ATTR_UNSPEC,
 	DEVLINK_PORT_FUNCTION_ATTR_HW_ADDR,	/* binary */
+	DEVLINK_PORT_FUNCTION_ATTR_STATE,	/* u8 */
+	DEVLINK_PORT_FUNCTION_ATTR_OPSTATE,	/* u8 */
 
 	__DEVLINK_PORT_FUNCTION_ATTR_MAX,
 	DEVLINK_PORT_FUNCTION_ATTR_MAX = __DEVLINK_PORT_FUNCTION_ATTR_MAX - 1
+};
+
+enum devlink_port_function_state {
+	DEVLINK_PORT_FUNCTION_STATE_INACTIVE,
+	DEVLINK_PORT_FUNCTION_STATE_ACTIVE,
+};
+
+/**
+ * enum devlink_port_function_opstate - indicates operational state of port function
+ * @DEVLINK_PORT_FUNCTION_OPSTATE_ATTACHED: Driver is attached to the function of port, for
+ *					    gracefufl tear down of the function, after
+ *					    inactivation of the port function, user should wait
+ *					    for operational state to turn DETACHED.
+ * @DEVLINK_PORT_FUNCTION_OPSTATE_DETACHED: Driver is detached from the function of port; it is
+ *					    safe to delete the port.
+ */
+enum devlink_port_function_opstate {
+	DEVLINK_PORT_FUNCTION_OPSTATE_DETACHED,
+	DEVLINK_PORT_FUNCTION_OPSTATE_ATTACHED,
 };
 
 #endif /* _UAPI_LINUX_DEVLINK_H_ */

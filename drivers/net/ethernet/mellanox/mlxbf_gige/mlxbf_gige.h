@@ -155,5 +155,6 @@ int mlxbf_gige_mdio_probe(struct platform_device *pdev,
 			  struct mlxbf_gige *priv);
 void mlxbf_gige_mdio_remove(struct mlxbf_gige *priv);
 irqreturn_t mlxbf_gige_mdio_handle_phy_interrupt(int irq, void *dev_id);
+void mlxbf_gige_mdio_enable_phy_int(struct mlxbf_gige *priv);
 
 #endif /* !defined(__MLXBF_GIGE_H__) */

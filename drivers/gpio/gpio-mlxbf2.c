@@ -376,6 +376,7 @@ mlxbf2_gpio_probe(struct platform_device *pdev)
 {
 	struct mlxbf2_gpio_context *gs;
 	struct device *dev = &pdev->dev;
+	unsigned int int_supported;
 	struct acpi_device *adev;
 	struct gpio_chip *gc;
 	struct resource *res;
@@ -457,18 +458,23 @@ mlxbf2_gpio_probe(struct platform_device *pdev)
 	}
 	platform_set_drvdata(pdev, gs);
 
-	/* Interrupts are only supported for GPIO bit 0 on yu gpio block 16 */
+	/* Only OCP3.0 supports the AUX power mode interrupt on bit 0 of yu.gpio[16] */
 	if (blk_id == 3) {
-		irq = platform_get_irq(pdev, 0);
-		gs->hwirq = irq;
-		mlxbf2_gpio_irq_enable(gs);
-		mlxbf2_gpio_irq_set_type(gs);
-		ret = devm_request_irq(dev, irq, mlxbf2_gpio_irq_handler,
-			IRQF_ONESHOT | IRQF_SHARED | IRQF_PROBE_SHARED,
-			dev_name(dev), gs);
-		if (ret) {
-			dev_err(dev, "IRQ handler register failed: %d\n", ret);
-			return ret;
+		ret = device_property_read_u32(dev, "int_supported", &int_supported);
+		if (ret < 0)
+			int_supported = 0;
+
+		if (int_supported) {
+			irq = platform_get_irq(pdev, 0);
+			gs->hwirq = irq;
+			ret = devm_request_irq(dev, irq, mlxbf2_gpio_irq_handler,
+				IRQF_ONESHOT | IRQF_SHARED | IRQF_PROBE_SHARED, dev_name(dev), gs);
+			if (ret) {
+				dev_err(dev, "IRQ handler registering failed (%d)\n", ret);
+				return ret;
+			}
+			mlxbf2_gpio_irq_set_type(gs);
+			mlxbf2_gpio_irq_enable(gs);
 		}
 	}
 

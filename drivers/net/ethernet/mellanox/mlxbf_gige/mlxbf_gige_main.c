@@ -21,7 +21,7 @@
 #include "mlxbf_gige_regs.h"
 
 #define DRV_NAME    "mlxbf_gige"
-#define DRV_VERSION "1.11"
+#define DRV_VERSION "1.12"
 
 static void mlxbf_gige_set_mac_rx_filter(struct mlxbf_gige *priv,
 					 unsigned int index, u64 dmac)
@@ -915,6 +915,8 @@ static int mlxbf_gige_open(struct net_device *netdev)
 	if (err)
 		return err;
 
+	mlxbf_gige_mdio_enable_phy_int(priv);
+
 	phy_start(phydev);
 	/* Always make sure interrupts are enabled since phy_start calls
 	 * __phy_resume which may reset the PHY interrupt control reg.
@@ -924,6 +926,8 @@ static int mlxbf_gige_open(struct net_device *netdev)
 	err = mlxbf_gige_phy_enable_interrupt(phydev);
 	if (err)
 		return err;
+
+	phy_start_aneg(phydev);
 
 	netif_napi_add(netdev, &priv->napi, mlxbf_gige_poll, NAPI_POLL_WEIGHT);
 	napi_enable(&priv->napi);

@@ -694,7 +694,8 @@ void mlx5_esw_ipsec_full_offload_get_stats(struct mlx5_eswitch *esw, void *ipsec
 	if (!esw_ipsec_decap_rule_counter(esw) ||
 	    !esw_ipsec_decap_miss_rule_counter(esw) ||
 	    !esw_ipsec_decap_miss_rule_counter(esw) ||
-	    !esw_ipsec_tx_chk_counter(esw))
+	    !esw_ipsec_tx_chk_counter(esw) ||
+	    !esw_ipsec_pol_miss_rule_counter(esw))
 		return;
 
 	mlx5_fc_query(esw->dev, esw_ipsec_decap_rule_counter(esw),
@@ -708,4 +709,7 @@ void mlx5_esw_ipsec_full_offload_get_stats(struct mlx5_eswitch *esw, void *ipsec
 
 	mlx5_fc_query(esw->dev, esw_ipsec_tx_chk_drop_counter(esw),
 		      &stats->ipsec_full_tx_pkts_drop, &stats->ipsec_full_tx_bytes_drop);
+
+	mlx5_fc_query(esw->dev, esw_ipsec_pol_miss_rule_counter(esw),
+		      &stats->ipsec_full_rx_pkts_pol_drop, &stats->ipsec_full_rx_bytes_pol_drop);
 }

@@ -76,6 +76,8 @@ struct mlx5e_ipsec_stats {
 
 	u64 ipsec_full_rx_pkts;
 	u64 ipsec_full_rx_bytes;
+	u64 ipsec_full_rx_pkts_pol_drop;
+	u64 ipsec_full_rx_bytes_pol_drop;
 	u64 ipsec_full_rx_pkts_drop;
 	u64 ipsec_full_rx_bytes_drop;
 	u64 ipsec_full_tx_pkts;

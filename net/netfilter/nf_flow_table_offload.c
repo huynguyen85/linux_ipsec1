@@ -13,6 +13,11 @@
 #include <net/netfilter/nf_conntrack_tuple.h>
 
 static struct workqueue_struct *nf_flow_offload_wq;
+static atomic_t nf_flow_offload_wq_count;
+
+static uint max_offload_add = 10000;
+module_param(max_offload_add, uint, 0644);
+MODULE_PARM_DESC(max_offload_add, "Limit offload add wq entries");
 
 struct flow_offload_work {
 	struct list_head	list;
@@ -796,10 +801,12 @@ static void flow_offload_work_handler(struct work_struct *work)
 
 	clear_bit(NF_FLOW_HW_PENDING, &offload->flow->flags);
 	kfree(offload);
+	atomic_dec(&nf_flow_offload_wq_count);
 }
 
 static void flow_offload_queue_work(struct flow_offload_work *offload)
 {
+	atomic_inc(&nf_flow_offload_wq_count);
 	queue_work(nf_flow_offload_wq, &offload->work);
 }
 
@@ -833,6 +840,9 @@ void nf_flow_offload_add(struct nf_flowtable *flowtable,
 			 enum flow_offload_tuple_dir dir)
 {
 	struct flow_offload_work *offload;
+
+	if (atomic_read(&nf_flow_offload_wq_count) >= max_offload_add)
+		return;
 
 	offload = nf_flow_offload_work_alloc(flowtable, flow, FLOW_CLS_REPLACE);
 	if (!offload)
@@ -1048,6 +1058,7 @@ int nf_flow_table_offload_init(void)
 	if (!nf_flow_offload_wq)
 		return -ENOMEM;
 
+	atomic_set(&nf_flow_offload_wq_count, 0);
 	flow_indr_add_block_cb(&block_ing_entry);
 
 	return 0;

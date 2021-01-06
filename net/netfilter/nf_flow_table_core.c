@@ -262,8 +262,9 @@ int flow_offload_add(struct nf_flowtable *flow_table, struct flow_offload *flow,
 	nf_ct_offload_timeout(flow->ct);
 
 	if (nf_flowtable_hw_offload(flow_table)) {
-		__set_bit(NF_FLOW_HW, &flow->flags);
-		nf_flow_offload_add(flow_table, flow, dir);
+		err = nf_flow_offload_add(flow_table, flow, dir);
+		if (!err)
+			__set_bit(NF_FLOW_HW, &flow->flags);
 	}
 
 	return 0;

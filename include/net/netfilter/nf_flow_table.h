@@ -255,9 +255,9 @@ unsigned int nf_flow_offload_ipv6_hook(void *priv, struct sk_buff *skb,
 #define MODULE_ALIAS_NF_FLOWTABLE(family)	\
 	MODULE_ALIAS("nf-flowtable-" __stringify(family))
 
-void nf_flow_offload_add(struct nf_flowtable *flowtable,
-			 struct flow_offload *flow,
-			 enum flow_offload_tuple_dir dir);
+int nf_flow_offload_add(struct nf_flowtable *flowtable,
+			struct flow_offload *flow,
+			enum flow_offload_tuple_dir dir);
 void nf_flow_offload_del(struct nf_flowtable *flowtable,
 			 struct flow_offload *flow);
 void nf_flow_offload_stats(struct nf_flowtable *flowtable,

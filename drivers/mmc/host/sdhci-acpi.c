@@ -611,6 +611,68 @@ static const struct sdhci_acpi_slot sdhci_acpi_slot_amd_emmc = {
 	.probe_slot     = sdhci_acpi_emmc_amd_probe_slot,
 };
 
+#define BOUNDARY_OK(addr, len) \
+	((addr | (SZ_128M - 1)) == ((addr + len - 1) | (SZ_128M - 1)))
+
+/*
+ * If DMA addr spans 128MB boundary, we split the DMA transfer into two
+ * so that each DMA transfer doesn't exceed the boundary.
+ */
+static void dwcmshc_adma_write_desc(struct sdhci_host *host, void **desc,
+				    dma_addr_t addr, int len, unsigned int cmd)
+{
+	int tmplen, offset;
+
+	if (likely(!len || BOUNDARY_OK(addr, len))) {
+		sdhci_adma_write_desc(host, desc, addr, len, cmd);
+		return;
+	}
+
+	offset = addr & (SZ_128M - 1);
+	tmplen = SZ_128M - offset;
+	sdhci_adma_write_desc(host, desc, addr, tmplen, cmd);
+
+	addr += tmplen;
+	len -= tmplen;
+	sdhci_adma_write_desc(host, desc, addr, len, cmd);
+}
+
+static int sdhci_acpi_emmc_nvda_probe_slot(struct platform_device *pdev,
+					   const char *hid, const char *uid)
+{
+	struct sdhci_acpi_host *c = platform_get_drvdata(pdev);
+	struct sdhci_host *host   = c->host;
+	u32 extra;
+
+	/*
+	 * extra adma table cnt for cross 128M boundary handling.
+	 */
+	extra = DIV_ROUND_UP_ULL(dma_get_required_mask(&pdev->dev), SZ_128M);
+	if (extra > SDHCI_MAX_SEGS)
+		extra = SDHCI_MAX_SEGS;
+	host->adma_table_cnt += extra;
+
+	return 0;
+}
+
+static const struct sdhci_ops sdhci_acpi_ops_nvda = {
+	.set_clock	= sdhci_set_clock,
+	.set_bus_width	= sdhci_set_bus_width,
+	.set_uhs_signaling = sdhci_set_uhs_signaling,
+	.reset		= sdhci_reset,
+	.adma_write_desc = dwcmshc_adma_write_desc,
+};
+
+static const struct sdhci_acpi_chip sdhci_acpi_chip_nvda = {
+	.ops = &sdhci_acpi_ops_nvda,
+};
+
+static const struct sdhci_acpi_slot sdhci_acpi_slot_nvda_emmc = {
+	.chip		= &sdhci_acpi_chip_nvda,
+	.caps		= MMC_CAP_8_BIT_DATA | MMC_CAP_NONREMOVABLE,
+	.probe_slot     = sdhci_acpi_emmc_nvda_probe_slot,
+};
+
 struct sdhci_acpi_uid_slot {
 	const char *hid;
 	const char *uid;
@@ -635,6 +697,7 @@ static const struct sdhci_acpi_uid_slot sdhci_acpi_uids[] = {
 	{ "QCOM8051", NULL, &sdhci_acpi_slot_qcom_sd_3v },
 	{ "QCOM8052", NULL, &sdhci_acpi_slot_qcom_sd },
 	{ "AMDI0040", NULL, &sdhci_acpi_slot_amd_emmc },
+	{ "MLNXBF30", NULL, &sdhci_acpi_slot_nvda_emmc },
 	{ },
 };
 
@@ -652,6 +715,7 @@ static const struct acpi_device_id sdhci_acpi_ids[] = {
 	{ "QCOM8051" },
 	{ "QCOM8052" },
 	{ "AMDI0040" },
+	{ "MLNXBF30" },
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, sdhci_acpi_ids);

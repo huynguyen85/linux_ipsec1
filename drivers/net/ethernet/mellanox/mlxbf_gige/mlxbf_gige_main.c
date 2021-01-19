@@ -21,7 +21,7 @@
 #include "mlxbf_gige_regs.h"
 
 #define DRV_NAME    "mlxbf_gige"
-#define DRV_VERSION "1.13"
+#define DRV_VERSION "1.14"
 
 static void mlxbf_gige_set_mac_rx_filter(struct mlxbf_gige *priv,
 					 unsigned int index, u64 dmac)
@@ -1272,8 +1272,8 @@ static int mlxbf_gige_remove(struct platform_device *pdev)
 
 	unregister_netdev(priv->netdev);
 	priv->netdev->phydev->irq = PHY_IGNORE_INTERRUPT;
-	phy_disconnect(priv->netdev->phydev);
 	mlxbf_gige_phy_disable_interrupt(priv->netdev->phydev);
+	phy_disconnect(priv->netdev->phydev);
 	mlxbf_gige_mdio_remove(priv);
 	platform_set_drvdata(pdev, NULL);
 

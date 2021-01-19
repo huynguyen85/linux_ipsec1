@@ -829,17 +829,8 @@ static int ksz9031_read_status(struct phy_device *phydev)
 	if ((regval & 0xFF) == 0xFF) {
 		phy_init_hw(phydev);
 		phydev->link = 0;
-		if (phydev->drv->config_intr && phy_interrupt_is_valid(phydev)) {
-			/* In the case where the PHY device is exposed to
-			 * abnormally high or low temperatures, make sure there
-			 * is no race condition between enabling the
-			 * interrupts again and the soft reset clearing the interrupt
-			 * control register.
-			 */
-			msleep(250);
-			printk("250ms after PHY software reset, PHY REG 0x1B=0x%x", phy_read(phydev, 0x1B));
+		if (phydev->drv->config_intr && phy_interrupt_is_valid(phydev))
 			phydev->drv->config_intr(phydev);
-		}
 		return genphy_config_aneg(phydev);
 	}
 

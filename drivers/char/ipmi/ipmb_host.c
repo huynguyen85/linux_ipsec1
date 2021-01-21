@@ -3,7 +3,7 @@
 /*
  * Copyright 2020, NVIDIA Corporation. All rights reserved.
  *
- * This was inspired by Brendan Higgins' bt-i2c driver. 
+ * This was inspired by Brendan Higgins' bt-i2c driver.
  *
  */
 
@@ -387,11 +387,12 @@ static int ipmb_receive_rsp(struct ipmb_master *master,
 {
 	struct ipmb_rsp_elem	*queue_elem;
 	int			ret = 1;
+	unsigned long		flags;
 
-	spin_lock_irq(&master->lock);
+	spin_lock_irqsave(&master->lock, flags);
 
 	if (list_empty(&master->rsp_queue)) {
-		spin_unlock_irq(&master->lock);
+		spin_unlock_irqrestore(&master->lock, flags);
 
 		ret = wait_event_interruptible_timeout(master->wait_queue,
 			!list_empty(&master->rsp_queue), IPMB_TIMEOUT);
@@ -399,16 +400,17 @@ static int ipmb_receive_rsp(struct ipmb_master *master,
 		if (ret <= 0)
 			return ret;
 
-		spin_lock_irq(&master->lock);
+		spin_lock_irqsave(&master->lock, flags);
 	}
 
 	queue_elem = list_first_entry(&master->rsp_queue,
 			struct ipmb_rsp_elem, list);
+
 	memcpy(ipmb_rsp, &queue_elem->rsp, sizeof(struct response));
 	list_del(&queue_elem->list);
 	kfree(queue_elem);
 	atomic_dec(&master->rsp_queue_len);
-	spin_unlock_irq(&master->lock);
+	spin_unlock_irqrestore(&master->lock, flags);
 
 	return ret;
 }
@@ -490,10 +492,6 @@ static void ipmb_send_workfn(struct work_struct *work)
 		return;
 	}
 
-	spin_lock_irqsave(&master->lock, flags);
-	master->msg_to_send = NULL;
-	spin_unlock_irqrestore(&master->lock, flags);
-
 	/* Done with sending request. Now handling response */
 
 	if (ipmb_receive_rsp(master, &ipmb_rsp_msg) <= 0) {
@@ -543,6 +541,10 @@ static void ipmb_send_workfn(struct work_struct *work)
 		ipmb_payload_len((size_t) rsp_msg_len));
 
 	ipmi_smi_msg_received(master->intf, rsp_msg);
+
+	spin_lock_irqsave(&master->lock, flags);
+	master->msg_to_send = NULL;
+	spin_unlock_irqrestore(&master->lock, flags);
 }
 
 /*

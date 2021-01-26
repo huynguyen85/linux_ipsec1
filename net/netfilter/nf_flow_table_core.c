@@ -289,8 +289,7 @@ void flow_offload_refresh(struct nf_flowtable *flow_table,
 		   !test_and_clear_bit(NF_FLOW_HW_REFRESH, &flow->flags)))
 		return;
 
-	if (nf_flow_offload_add(flow_table, flow, dir))
-		set_bit(NF_FLOW_HW_REFRESH, &flow->flags);
+	nf_flow_offload_add(flow_table, flow, dir);
 }
 EXPORT_SYMBOL_GPL(flow_offload_refresh);
 

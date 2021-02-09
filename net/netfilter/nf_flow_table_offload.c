@@ -835,22 +835,21 @@ nf_flow_offload_work_alloc(struct nf_flowtable *flowtable,
 }
 
 
-int nf_flow_offload_add(struct nf_flowtable *flowtable,
-			struct flow_offload *flow,
-			enum flow_offload_tuple_dir dir)
+void nf_flow_offload_add(struct nf_flowtable *flowtable,
+			 struct flow_offload *flow,
+			 enum flow_offload_tuple_dir dir)
 {
 	struct flow_offload_work *offload;
 
 	if (atomic_read(&nf_flow_offload_wq_count) >= max_offload_add)
-		return -EBUSY;
+		return;
 
 	offload = nf_flow_offload_work_alloc(flowtable, flow, FLOW_CLS_REPLACE);
 	if (!offload)
-		return -ENOMEM;
+		return;
 
 	offload->dir = dir;
 	flow_offload_queue_work(offload);
-	return 0;
 }
 
 void nf_flow_offload_del(struct nf_flowtable *flowtable,

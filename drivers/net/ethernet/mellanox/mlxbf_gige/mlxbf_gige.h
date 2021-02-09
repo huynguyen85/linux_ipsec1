@@ -4,7 +4,7 @@
  * - this file contains software data structures and any chip-specific
  *   data structures (e.g. TX WQE format) that are memory resident.
  *
- * Copyright (c) 2020 NVIDIA Corporation.
+ * Copyright (c) 2020-2021 NVIDIA Corporation.
  */
 
 #ifndef __MLXBF_GIGE_H__
@@ -156,5 +156,27 @@ int mlxbf_gige_mdio_probe(struct platform_device *pdev,
 void mlxbf_gige_mdio_remove(struct mlxbf_gige *priv);
 irqreturn_t mlxbf_gige_mdio_handle_phy_interrupt(int irq, void *dev_id);
 void mlxbf_gige_mdio_enable_phy_int(struct mlxbf_gige *priv);
+
+void mlxbf_gige_set_mac_rx_filter(struct mlxbf_gige *priv,
+				  unsigned int index, u64 dmac);
+void mlxbf_gige_get_mac_rx_filter(struct mlxbf_gige *priv,
+				  unsigned int index, u64 *dmac);
+void mlxbf_gige_enable_promisc(struct mlxbf_gige *priv);
+void mlxbf_gige_disable_promisc(struct mlxbf_gige *priv);
+int mlxbf_gige_rx_init(struct mlxbf_gige *priv);
+void mlxbf_gige_rx_deinit(struct mlxbf_gige *priv);
+int mlxbf_gige_tx_init(struct mlxbf_gige *priv);
+void mlxbf_gige_tx_deinit(struct mlxbf_gige *priv);
+bool mlxbf_gige_handle_tx_complete(struct mlxbf_gige *priv);
+netdev_tx_t mlxbf_gige_start_xmit(struct sk_buff *skb,
+				  struct net_device *netdev);
+struct sk_buff *mlxbf_gige_alloc_skb(struct mlxbf_gige *priv,
+				     dma_addr_t *buf_dma,
+				     enum dma_data_direction dir);
+int mlxbf_gige_request_irqs(struct mlxbf_gige *priv);
+void mlxbf_gige_free_irqs(struct mlxbf_gige *priv);
+int mlxbf_gige_poll(struct napi_struct *napi, int budget);
+extern const struct ethtool_ops mlxbf_gige_ethtool_ops;
+void mlxbf_gige_update_tx_wqe_next(struct mlxbf_gige *priv);
 
 #endif /* !defined(__MLXBF_GIGE_H__) */

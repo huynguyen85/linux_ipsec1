@@ -2,7 +2,7 @@
 
 /* MDIO support for Mellanox Gigabit Ethernet driver
  *
- * Copyright (c) 2020 NVIDIA Corporation.
+ * Copyright (c) 2020-2021 NVIDIA Corporation.
  */
 
 #include <linux/acpi.h>
@@ -68,7 +68,7 @@
 				 FIELD_PREP(MLXBF_GIGE_MDIO_CFG_MDIO3_3_MASK, 1) | \
 				 FIELD_PREP(MLXBF_GIGE_MDIO_CFG_MDIO_FULL_DRIVE_MASK, 1) | \
 				 FIELD_PREP(MLXBF_GIGE_MDIO_CFG_MDC_PERIOD_MASK, \
-					    MLXBF_GIGE_MDIO_PERIOD) |   \
+					    MLXBF_GIGE_MDIO_PERIOD) | \
 				 FIELD_PREP(MLXBF_GIGE_MDIO_CFG_MDIO_IN_SAMP_MASK, 6) | \
 				 FIELD_PREP(MLXBF_GIGE_MDIO_CFG_MDIO_OUT_SAMP_MASK, 13))
 

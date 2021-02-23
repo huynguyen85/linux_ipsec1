@@ -123,19 +123,7 @@ int mlxbf_gige_request_irqs(struct mlxbf_gige *priv)
 		goto free_rx_irq;
 	}
 
-	err = request_threaded_irq(priv->phy_irq, NULL,
-				   mlxbf_gige_mdio_handle_phy_interrupt,
-				   IRQF_ONESHOT | IRQF_SHARED,
-				   "mlxbf_gige_phy", priv);
-	if (err) {
-		dev_err(priv->dev, "Request phy_irq failure\n");
-		goto free_llu_plu_irq;
-	}
-
 	return 0;
-
-free_llu_plu_irq:
-	free_irq(priv->llu_plu_irq, priv);
 
 free_rx_irq:
 	free_irq(priv->rx_irq, priv);
@@ -151,6 +139,5 @@ void mlxbf_gige_free_irqs(struct mlxbf_gige *priv)
 	free_irq(priv->error_irq, priv);
 	free_irq(priv->rx_irq, priv);
 	free_irq(priv->llu_plu_irq, priv);
-	free_irq(priv->phy_irq, priv);
 }
 

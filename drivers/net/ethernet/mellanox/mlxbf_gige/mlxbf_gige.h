@@ -53,6 +53,8 @@
 
 #define MLXBF_GIGE_MDIO_DEFAULT_PHY_ADDR 0x3
 
+#define MLXBF_GIGE_DEFAULT_PHY_INT_GPIO 12
+
 struct mlxbf_gige_stats {
 	u64 hw_access_errors;
 	u64 tx_invalid_checksums;
@@ -77,8 +79,6 @@ struct mlxbf_gige {
 	struct platform_device *pdev;
 	void __iomem *mdio_io;
 	struct mii_bus *mdiobus;
-	void __iomem *gpio_io;
-	u32 phy_int_gpio_mask;
 	spinlock_t lock;
 	spinlock_t gpio_lock;
 	u16 rx_q_entries;
@@ -143,7 +143,6 @@ struct mlxbf_gige {
 enum mlxbf_gige_res {
 	MLXBF_GIGE_RES_MAC,
 	MLXBF_GIGE_RES_MDIO9,
-	MLXBF_GIGE_RES_GPIO0,
 	MLXBF_GIGE_RES_LLU,
 	MLXBF_GIGE_RES_PLU
 };

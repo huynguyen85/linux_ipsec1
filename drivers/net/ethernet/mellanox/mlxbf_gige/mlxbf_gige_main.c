@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
 #include <linux/etherdevice.h>
+#include <linux/irqdomain.h>
 #include <linux/interrupt.h>
 #include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/iopoll.h>
@@ -21,7 +22,7 @@
 #include "mlxbf_gige_regs.h"
 
 #define DRV_NAME    "mlxbf_gige"
-#define DRV_VERSION "1.15"
+#define DRV_VERSION 1.16
 
 /* Allocate SKB whose payload pointer aligns with the Bluefield
  * hardware DMA limitation, i.e. DMA operation can't cross
@@ -64,22 +65,6 @@ struct sk_buff *mlxbf_gige_alloc_skb(struct mlxbf_gige *priv,
 	}
 
 	return skb;
-}
-
-static int mlxbf_gige_phy_disable_interrupt(struct phy_device *phydev)
-{
-	int err = 0;
-
-	phydev->interrupts = PHY_INTERRUPT_DISABLED;
-	if (phydev->drv->config_intr)
-		err = phydev->drv->config_intr(phydev);
-	if (err < 0)
-		return err;
-
-	if (phydev->drv->ack_interrupt)
-		err = phydev->drv->ack_interrupt(phydev);
-
-	return err;
 }
 
 static void mlxbf_gige_initial_mac(struct mlxbf_gige *priv)
@@ -163,9 +148,6 @@ static int mlxbf_gige_open(struct net_device *netdev)
 	if (err)
 		return err;
 
-	phydev->irq = priv->phy_irq;
-	mlxbf_gige_mdio_enable_phy_int(priv);
-
 	phy_start(phydev);
 
 	netif_napi_add(netdev, &priv->napi, mlxbf_gige_poll, NAPI_POLL_WEIGHT);
@@ -196,7 +178,6 @@ static int mlxbf_gige_stop(struct net_device *netdev)
 	mlxbf_gige_free_irqs(priv);
 
 	phy_stop(netdev->phydev);
-	mlxbf_gige_phy_disable_interrupt(netdev->phydev);
 
 	mlxbf_gige_rx_deinit(priv);
 	mlxbf_gige_tx_deinit(priv);
@@ -272,6 +253,7 @@ static void mlxbf_gige_adjust_link(struct net_device *netdev)
 
 static int mlxbf_gige_probe(struct platform_device *pdev)
 {
+	unsigned int phy_int_gpio;
 	struct phy_device *phydev;
 	struct net_device *netdev;
 	struct resource *mac_res;
@@ -281,9 +263,21 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 	void __iomem *llu_base;
 	void __iomem *plu_base;
 	void __iomem *base;
+	int addr, version;
 	u64 control;
 	int err = 0;
-	int addr;
+
+	if (device_property_read_u32(&pdev->dev, "version", &version)) {
+		dev_err(&pdev->dev, "Version Info not found\n");
+		return -EINVAL;
+	}
+
+	if (version != (int)DRV_VERSION) {
+		dev_err(&pdev->dev, "Version Mismatch. Expected %d Returned %d\n",
+			(int)DRV_VERSION, version);
+		return -EINVAL;
+	}
+
 
 	mac_res = platform_get_resource(pdev, IORESOURCE_MEM, MLXBF_GIGE_RES_MAC);
 	if (!mac_res)
@@ -355,14 +349,20 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 	priv->error_irq = platform_get_irq(pdev, MLXBF_GIGE_ERROR_INTR_IDX);
 	priv->rx_irq = platform_get_irq(pdev, MLXBF_GIGE_RECEIVE_PKT_INTR_IDX);
 	priv->llu_plu_irq = platform_get_irq(pdev, MLXBF_GIGE_LLU_PLU_INTR_IDX);
-	priv->phy_irq = platform_get_irq(pdev, MLXBF_GIGE_PHY_INT_N);
 
+	err = device_property_read_u32(&pdev->dev, "phy-int-gpio", &phy_int_gpio);
+	if (err < 0)
+		phy_int_gpio = MLXBF_GIGE_DEFAULT_PHY_INT_GPIO;
+
+	priv->phy_irq = irq_find_mapping(NULL, phy_int_gpio);
+	if (priv->phy_irq == 0)
+		return -ENODEV;
 	phydev = phy_find_first(priv->mdiobus);
 	if (!phydev)
 		return -ENODEV;
 
 	addr = phydev->mdio.addr;
-	phydev->irq = priv->mdiobus->irq[addr] = PHY_IGNORE_INTERRUPT;
+	phydev->irq = priv->mdiobus->irq[addr] = priv->phy_irq;
 
 	/* Sets netdev->phydev to phydev; which will eventually
 	 * be used in ioctl calls.
@@ -409,8 +409,6 @@ static int mlxbf_gige_remove(struct platform_device *pdev)
 	struct mlxbf_gige *priv = platform_get_drvdata(pdev);
 
 	unregister_netdev(priv->netdev);
-	priv->netdev->phydev->irq = PHY_IGNORE_INTERRUPT;
-	mlxbf_gige_phy_disable_interrupt(priv->netdev->phydev);
 	phy_disconnect(priv->netdev->phydev);
 	mlxbf_gige_mdio_remove(priv);
 	platform_set_drvdata(pdev, NULL);
@@ -444,8 +442,9 @@ static struct platform_driver mlxbf_gige_driver = {
 
 module_platform_driver(mlxbf_gige_driver);
 
+MODULE_SOFTDEP("pre: gpio_mlxbf2");
 MODULE_DESCRIPTION("Mellanox BlueField SoC Gigabit Ethernet Driver");
 MODULE_AUTHOR("David Thompson <davthompson@nvidia.com>");
 MODULE_AUTHOR("Asmaa Mnebhi <asmaa@nvidia.com>");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_VERSION(DRV_VERSION);
+MODULE_VERSION(__stringify(DRV_VERSION));

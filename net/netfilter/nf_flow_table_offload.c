@@ -12,7 +12,9 @@
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/nf_conntrack_tuple.h>
 
-static struct workqueue_struct *nf_flow_offload_wq;
+static struct workqueue_struct *nf_flow_offload_add_wq;
+static struct workqueue_struct *nf_flow_offload_del_wq;
+static struct workqueue_struct *nf_flow_offload_stats_wq;
 static atomic_t nf_flow_offload_wq_count;
 
 static uint max_offload_add = 10000;
@@ -807,7 +809,13 @@ static void flow_offload_work_handler(struct work_struct *work)
 static void flow_offload_queue_work(struct flow_offload_work *offload)
 {
 	atomic_inc(&nf_flow_offload_wq_count);
-	queue_work(nf_flow_offload_wq, &offload->work);
+	if (offload->cmd == FLOW_CLS_REPLACE)
+		queue_work(nf_flow_offload_add_wq, &offload->work);
+	else if (offload->cmd == FLOW_CLS_DESTROY)
+		queue_work(nf_flow_offload_del_wq, &offload->work);
+	else
+		queue_work(nf_flow_offload_stats_wq, &offload->work);
+
 }
 
 static struct flow_offload_work *
@@ -884,8 +892,11 @@ void nf_flow_offload_stats(struct nf_flowtable *flowtable,
 
 void nf_flow_table_offload_flush(struct nf_flowtable *flowtable)
 {
-	if (nf_flowtable_hw_offload(flowtable))
-		flush_workqueue(nf_flow_offload_wq);
+	if (nf_flowtable_hw_offload(flowtable)) {
+		flush_workqueue(nf_flow_offload_add_wq);
+		flush_workqueue(nf_flow_offload_del_wq);
+		flush_workqueue(nf_flow_offload_stats_wq);
+	}
 }
 
 static int nf_flow_table_block_setup(struct nf_flowtable *flowtable,
@@ -1053,19 +1064,37 @@ static struct flow_indr_block_entry block_ing_entry = {
 
 int nf_flow_table_offload_init(void)
 {
-	nf_flow_offload_wq  = alloc_workqueue("nf_flow_table_offload",
-					      WQ_UNBOUND, 0);
-	if (!nf_flow_offload_wq)
+	nf_flow_offload_add_wq  = alloc_workqueue("nf_ft_offload_add",
+						  WQ_UNBOUND | WQ_SYSFS, 0);
+	if (!nf_flow_offload_add_wq)
 		return -ENOMEM;
+
+	nf_flow_offload_del_wq  = alloc_workqueue("nf_ft_offload_del",
+						  WQ_UNBOUND | WQ_SYSFS, 0);
+	if (!nf_flow_offload_del_wq)
+		goto err_del_wq;
+
+	nf_flow_offload_stats_wq  = alloc_workqueue("nf_ft_offload_stats",
+						    WQ_UNBOUND | WQ_SYSFS, 0);
+	if (!nf_flow_offload_stats_wq)
+		goto err_stats_wq;
 
 	atomic_set(&nf_flow_offload_wq_count, 0);
 	flow_indr_add_block_cb(&block_ing_entry);
 
 	return 0;
+
+err_stats_wq:
+	destroy_workqueue(nf_flow_offload_del_wq);
+err_del_wq:
+	destroy_workqueue(nf_flow_offload_add_wq);
+	return -ENOMEM;
 }
 
 void nf_flow_table_offload_exit(void)
 {
 	flow_indr_del_block_cb(&block_ing_entry);
-	destroy_workqueue(nf_flow_offload_wq);
+	destroy_workqueue(nf_flow_offload_add_wq);
+	destroy_workqueue(nf_flow_offload_del_wq);
+	destroy_workqueue(nf_flow_offload_stats_wq);
 }

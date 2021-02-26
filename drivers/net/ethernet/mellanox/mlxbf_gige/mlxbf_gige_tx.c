@@ -200,7 +200,7 @@ netdev_tx_t mlxbf_gige_start_xmit(struct sk_buff *skb,
 	if (skb_linearize(skb)) {
 		dev_kfree_skb(skb);
 		netdev->stats.tx_dropped++;
-		return NET_XMIT_DROP;
+		return NETDEV_TX_OK;
 	}
 
 	buff_addr = (u64)skb->data;
@@ -217,7 +217,7 @@ netdev_tx_t mlxbf_gige_start_xmit(struct sk_buff *skb,
 			/* Free original skb, could not alloc new aligned SKB */
 			dev_kfree_skb(skb);
 			netdev->stats.tx_dropped++;
-			return NET_XMIT_DROP;
+			return NETDEV_TX_OK;
 		}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0)
@@ -241,7 +241,7 @@ netdev_tx_t mlxbf_gige_start_xmit(struct sk_buff *skb,
 		if (dma_mapping_error(priv->dev, tx_buf_dma)) {
 			dev_kfree_skb(skb);
 			netdev->stats.tx_dropped++;
-			return NET_XMIT_DROP;
+			return NETDEV_TX_OK;
 		}
 	}
 

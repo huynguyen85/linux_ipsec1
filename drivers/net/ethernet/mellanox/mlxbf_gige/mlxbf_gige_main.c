@@ -11,7 +11,6 @@
 #include <linux/etherdevice.h>
 #include <linux/irqdomain.h>
 #include <linux/interrupt.h>
-#include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/phy.h>
@@ -22,7 +21,7 @@
 #include "mlxbf_gige_regs.h"
 
 #define DRV_NAME    "mlxbf_gige"
-#define DRV_VERSION 1.17
+#define DRV_VERSION 1.18
 
 /* Allocate SKB whose payload pointer aligns with the Bluefield
  * hardware DMA limitation, i.e. DMA operation can't cross
@@ -213,7 +212,7 @@ static void mlxbf_gige_set_rx_mode(struct net_device *netdev)
 			mlxbf_gige_enable_promisc(priv);
 		else
 			mlxbf_gige_disable_promisc(priv);
-	}
+        }
 }
 
 static void mlxbf_gige_get_stats64(struct net_device *netdev,

@@ -6,7 +6,6 @@
  */
 
 #include <linux/skbuff.h>
-#include <linux/version.h>
 
 #include "mlxbf_gige.h"
 #include "mlxbf_gige_regs.h"
@@ -190,7 +189,7 @@ netdev_tx_t mlxbf_gige_start_xmit(struct sk_buff *skb,
 				  struct net_device *netdev)
 {
 	struct mlxbf_gige *priv = netdev_priv(netdev);
-	u64 buff_addr, start_dma_page, end_dma_page;
+	long buff_addr, start_dma_page, end_dma_page;
 	struct sk_buff *tx_skb;
 	dma_addr_t tx_buf_dma;
 	u64 *tx_wqe_addr;
@@ -203,7 +202,7 @@ netdev_tx_t mlxbf_gige_start_xmit(struct sk_buff *skb,
 		return NETDEV_TX_OK;
 	}
 
-	buff_addr = (u64)skb->data;
+	buff_addr = (long)skb->data;
 	start_dma_page = buff_addr >> MLXBF_GIGE_DMA_PAGE_SHIFT;
 	end_dma_page   = (buff_addr + skb->len - 1) >> MLXBF_GIGE_DMA_PAGE_SHIFT;
 
@@ -220,17 +219,8 @@ netdev_tx_t mlxbf_gige_start_xmit(struct sk_buff *skb,
 			return NETDEV_TX_OK;
 		}
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0)
 		skb_put_data(tx_skb, skb->data, skb->len);
-#else
-		{
-			/* Older kernels do not provide the skb_put_data()
-			 * macro so add it explicitly here.
-			 */
-			void *tmp = skb_put(tx_skb, skb->len);
-			memcpy(tmp, skb->data, skb->len);
-		}
-#endif
+
 		/* Free the original SKB */
 		dev_kfree_skb(skb);
 	} else {
@@ -266,10 +256,7 @@ netdev_tx_t mlxbf_gige_start_xmit(struct sk_buff *skb,
 
 	priv->tx_pi++;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 131)
-	if (!netdev_xmit_more())
-#endif
-	{
+	if (!netdev_xmit_more()) {
 		/* Create memory barrier before write to TX PI */
 		wmb();
 		writeq(priv->tx_pi, priv->base + MLXBF_GIGE_TX_PRODUCER_INDEX);

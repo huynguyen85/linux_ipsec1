@@ -203,10 +203,10 @@ static bool mlxbf_gige_rx_packet(struct mlxbf_gige *priv, int *rx_pkts)
 {
 	struct net_device *netdev = priv->netdev;
 	u16 rx_pi_rem, rx_ci_rem;
+	dma_addr_t *rx_wqe_addr;
 	dma_addr_t rx_buf_dma;
 	struct sk_buff *skb;
 	u64 *rx_cqe_addr;
-	u64 *rx_wqe_addr;
 	u64 datalen;
 	u64 rx_cqe;
 	u16 rx_ci;

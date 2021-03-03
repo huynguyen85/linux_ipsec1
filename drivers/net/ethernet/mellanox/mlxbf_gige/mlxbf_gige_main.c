@@ -21,7 +21,7 @@
 #include "mlxbf_gige_regs.h"
 
 #define DRV_NAME    "mlxbf_gige"
-#define DRV_VERSION 1.18
+#define DRV_VERSION 1.19
 
 /* Allocate SKB whose payload pointer aligns with the Bluefield
  * hardware DMA limitation, i.e. DMA operation can't cross
@@ -342,6 +342,7 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 	err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
 	if (err) {
 		dev_err(&pdev->dev, "DMA configuration failed: 0x%x\n", err);
+		mlxbf_gige_mdio_remove(priv);
 		return err;
 	}
 
@@ -354,11 +355,15 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 		phy_int_gpio = MLXBF_GIGE_DEFAULT_PHY_INT_GPIO;
 
 	priv->phy_irq = irq_find_mapping(NULL, phy_int_gpio);
-	if (priv->phy_irq == 0)
+	if (priv->phy_irq == 0) {
+		mlxbf_gige_mdio_remove(priv);
 		return -ENODEV;
+	}
 	phydev = phy_find_first(priv->mdiobus);
-	if (!phydev)
+	if (!phydev) {
+		mlxbf_gige_mdio_remove(priv);
 		return -ENODEV;
+	}
 
 	addr = phydev->mdio.addr;
 	phydev->irq = priv->mdiobus->irq[addr] = priv->phy_irq;
@@ -372,6 +377,7 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 				 PHY_INTERFACE_MODE_GMII);
 	if (err) {
 		dev_err(&pdev->dev, "Could not attach to PHY\n");
+		mlxbf_gige_mdio_remove(priv);
 		return err;
 	}
 
@@ -397,6 +403,7 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 	if (err) {
 		dev_err(&pdev->dev, "Failed to register netdev\n");
 		phy_disconnect(phydev);
+		mlxbf_gige_mdio_remove(priv);
 		return err;
 	}
 

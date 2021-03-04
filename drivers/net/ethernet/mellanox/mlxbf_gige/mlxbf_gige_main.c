@@ -277,7 +277,6 @@ static int mlxbf_gige_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-
 	mac_res = platform_get_resource(pdev, IORESOURCE_MEM, MLXBF_GIGE_RES_MAC);
 	if (!mac_res)
 		return -ENXIO;

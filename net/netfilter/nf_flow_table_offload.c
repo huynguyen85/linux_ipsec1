@@ -790,6 +790,7 @@ static void flow_offload_work_handler(struct work_struct *work)
 	switch (offload->cmd) {
 		case FLOW_CLS_REPLACE:
 			flow_offload_work_add(offload);
+			atomic_dec(&nf_flow_offload_wq_count);
 			break;
 		case FLOW_CLS_DESTROY:
 			flow_offload_work_del(offload);
@@ -803,18 +804,18 @@ static void flow_offload_work_handler(struct work_struct *work)
 
 	clear_bit(NF_FLOW_HW_PENDING, &offload->flow->flags);
 	kfree(offload);
-	atomic_dec(&nf_flow_offload_wq_count);
 }
 
 static void flow_offload_queue_work(struct flow_offload_work *offload)
 {
-	atomic_inc(&nf_flow_offload_wq_count);
-	if (offload->cmd == FLOW_CLS_REPLACE)
+	if (offload->cmd == FLOW_CLS_REPLACE) {
 		queue_work(nf_flow_offload_add_wq, &offload->work);
-	else if (offload->cmd == FLOW_CLS_DESTROY)
+		atomic_inc(&nf_flow_offload_wq_count);
+	} else if (offload->cmd == FLOW_CLS_DESTROY) {
 		queue_work(nf_flow_offload_del_wq, &offload->work);
-	else
+	} else {
 		queue_work(nf_flow_offload_stats_wq, &offload->work);
+	}
 
 }
 

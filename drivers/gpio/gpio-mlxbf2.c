@@ -329,12 +329,10 @@ static int mlxbf2_gpio_direction_output(struct gpio_chip *chip,
 
 static void mlxbf2_gpio_send_work(struct work_struct *work)
 {
-	struct mlxbf2_gpio_context *gs;
-
-	gs = container_of(work, struct mlxbf2_gpio_context, send_work);
-
+#ifdef  CONFIG_ACPI
 	acpi_bus_generate_netlink_event("button/power.*", "Power Button",
 					0x80, 1);
+#endif
 }
 
 static u32 mlxbf2_gpio_get_int_mask(struct mlxbf2_gpio_context *gs)
